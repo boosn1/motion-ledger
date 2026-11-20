@@ -1,5 +1,7 @@
 # motion-ledger · 台账驱动的动效制作 Skill
 
+**中文** · [English](README.en.md)
+
 > 让任何模型（包括较弱的模型）做出接近强模型的代码动效片。
 > 不靠"审美提示"，靠**三张台账**把模糊需求变成精确值，靠**代码门禁**把"感觉不错"变成 PASS/FAIL。
 
@@ -22,23 +24,30 @@
 
 ---
 
-## 三层结构
+## 四层结构
 
 ```
-┌─ 纪律层 ────────────────────────────────────────────────┐
-│ 三张台账 S/X/E：需求台账 / 变形台账 / 元素台账          │
-│ 时间线先于代码 · 先设计后运动 · 台账 id 回写到源码注释   │
-├─ 工艺层 ────────────────────────────────────────────────┤
-│ 时值表（120–220 / 350–650 / 600–1200 / 900–1800ms）      │
-│ 视觉语法四类 · 注意力三层 · 单一材质世界逻辑             │
-│ 9 类元素 playbook · 6 条通用规则 · 声音政策              │
-├─ 门禁层（本项目原创，别人没有的）───────────────────────┤
-│ verify/film.mjs   MP4 体检：格式/首帧/循环/运动曲线/反PPT │
-│ verify/spec.mjs   台账覆盖率 + 占位符 + 禁用项源码扫描    │
-└─────────────────────────────────────────────────────────┘
+┌─ 1 纪律层 ───────────────────────────────────────────────┐
+│  三张台账 S/X/E · 时间线先于代码 · 台账 id 回写源码        │
+│  产出 LEDGER.md              审计 verify/spec.mjs         │
+├─ 2 工艺层 ───────────────────────────────────────────────┤
+│  时值表（120–220 / 350–650 / 600–1200 / 900–1800ms）      │
+│  视觉语法四类 · 注意力三层 · 单一材质世界逻辑             │
+│  9 类元素 playbook · 6 条通用规则 · 声音政策              │
+│  产出 spec.ts + scenes/      审计 禁用项扫描 + 五维复审    │
+├─ 3 门禁层（本项目原创，别人没有的）───────────────────────┤
+│  verify/film.mjs   MP4 体检：格式/首帧/循环/运动曲线/反PPT │
+│  verify/spec.mjs   台账覆盖率 + 占位符 + 禁用项源码扫描    │
+│  产出 PASS/FAIL + out/check/ 审计 verify/selftest.mjs      │
+├─ 4 交付层 ───────────────────────────────────────────────┤
+│  字幕 · 多轨 · 转场 · 配音对齐 · 混音 · 按平台改比例       │
+│  产出 final.mp4              审计 ffprobe + 抽帧目视       │
+└──────────────────────────────────────────────────────────┘
 ```
 
 **关键差异**：市面上同类 skill 的验收都是"让模型给自己打分"，天然有确认偏差。本项目把能代码判定的部分**全部代码化**——运动曲线、反 PPT 门禁、台账覆盖率、禁用项扫描，这些不靠模型自觉。
+
+每一层管什么、不管什么、边界在哪，以及**为什么是四层不是三层或五层**，见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)（中英双语）。
 
 ---
 
@@ -46,11 +55,14 @@
 
 ### 第 1 步：装
 
+**DeepSeek Harness 的技能目录是 `~/.dsh/skills`（Windows：`D:\Users\<你>\.dsh\skills`）**：
+
 ```bash
-# 放到任意 agent 的 skills 目录
-git clone git@github.com:boosn1/motion-ledger.git ~/.claude/skills/motion-ledger
-# 也认 .hub/skills、.agents/skills、.codebuddy/skills 等
+git clone git@github.com:boosn1/motion-ledger.git ~/.dsh/skills/motion-ledger
 ```
+
+其他宿主按各自的根目录放：`.claude/skills`、`.agents/skills`、项目内 `.dsh/skills`。
+要求：`SKILL.md` 必须有非空 `name` 与 `description` frontmatter，否则会被静默忽略。
 
 依赖：
 
@@ -146,21 +158,25 @@ node verify/selftest.mjs
 
 ## 能做什么（按把握度排序）
 
-| 类型 | 把握 | 说明 |
-|---|---|---|
-| 品牌/产品动效片 15–60s | 最大 | 元素有明确来路去处，代码逐帧确定，无漂移 |
-| 数据动画 / 图表变形 | 很大 | 数值全部原文引用，门禁查覆盖率 |
-| 动态文字 / Logo 演绎 | 很大 | 矢量无模糊边界，CJK 竖排与字距都能算准 |
-| 讲解片 / Explainer | 中上 | 有旁白时间轴时按词级排镜；纯手绘插画风格做不了 |
-| UI / 产品演示 | 中 | 要真截图；手搓假界面一眼假 |
-| 风格化艺术动画 | 中 | 纸墨/半调/拼贴可以；真厚涂油画不行 |
-| 角色短片 | 最低 | 能走位能换姿势，保证不了表演（原项目自测相似度仅 0.40–0.49） |
+把握度不是感觉，是**可验证的原因**：能逐帧确定、能被台账追溯、能被门禁核对的部分把握最高。
 
-**不能做**：真人拍摄、剪辑现成素材、加字幕（这些用剪辑软件）、写实画面生成（用图像模型）、语音合成、2 分钟以上的长叙事。
+| 类型 | 把握 | 为什么 | 典型时长 |
+|---|---|---|---|
+| 品牌/产品动效片 | **最大** | 元素有明确来路去处，代码逐帧确定，无漂移；构图可 px 级定死 | 15–60s |
+| 数据动画 / 图表变形 | **很大** | 数值全部原文引用台账，门禁查覆盖率；变形走共享槽位不丢身份 | 15–40s |
+| 动态文字 / Logo 演绎 | **很大** | 矢量无模糊边界，CJK 竖排与字距能算准，`<Letters>` 逐字可控 | 5–30s |
+| 讲解片 / Explainer | **中上** | 有旁白时间轴时按词级排镜；纯手绘插画风格做不了 | 60–120s |
+| UI / 产品演示 | **中** | 必须真截图（PageCam 式 2.5D 相机）；手搓假界面一眼假 | 15–40s |
+| 风格化艺术动画 | **中** | 纸墨/半调/拼贴/版画可以；真厚涂油画不行 | 10–40s |
+| 角色短片 | **最低** | 能走位能换姿势，保证不了表演（原项目自测相似度仅 0.40–0.49） | 不确定 |
+
+对照：同一套流程下，数据动画相似度 **0.85–0.96**、文字类 **0.79–0.94**、多材质 **0.68–0.89**、角色故事 **0.40–0.49**。
+
+**不能做**：真人拍摄、剪辑现成素材、写实画面生成（用图像模型）、语音合成、2 分钟以上的长叙事。
 
 一条判断规则：**难点是「精确」还是「质感」？** 精确（数值、形状、卡拍、跨镜一致）→ 这套流程赢；质感（像画的、像拍的、有笔触）→ 这套流程输，该接图像模型。两类混在一起就分开做：质感的用模型出素材，精确的用代码排布。
 
-完整清单与成本估计见 [`references/09-capabilities.md`](references/09-capabilities.md)。
+完整清单、成本估计与边界见 [`references/09-capabilities.md`](references/09-capabilities.md)。
 
 ---
 
@@ -182,9 +198,10 @@ Concat 0.2.12 · D:\Program Files\Concat\concat.exe
 交付 final.mp4 · 847551 bytes
 ```
 
-**不要用 Concat 替代 Remotion**——那是用剪辑软件画动画，每帧手工摆位置，回到没有台账没有门禁的老路。也不要指望 Remotion 做字幕排版和配音对齐。分工见 [`references/08-delivery.md`](references/08-delivery.md)。
+**Concat 是第 4 层（交付层）的一个实现，不是第 5 层，也不替代第 1–3 层。**
+不要用它替代 Remotion——那是用剪辑软件画动画，每帧手工摆位置，回到没有台账没有门禁的老路。也不要指望 Remotion 做字幕排版和配音对齐。分工见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#concat-在哪一层起什么作用) 与 [`references/08-delivery.md`](references/08-delivery.md)。
 
-没有 Concat 也能交付：`ffmpeg -vf subtitles=` 烧硬字幕、`-i voice.wav -shortest` 接配音、`-f concat` 拼接。
+没有 Concat 也能交付：`ffmpeg -vf subtitles=` 烧硬字幕、`-i voice.wav -shortest` 接配音、`-f concat` 拼接。**层不会消失，只是实现换了。**
 
 ---
 
@@ -197,6 +214,19 @@ node scripts/publish.mjs --dry    # 只检查不提交
 
 门禁不过就拒绝提交——**坏的门禁比没有门禁更糟**，它会让后面所有结论都不可信。
 
+推完同步到 DSH 技能目录（否则本地技能中心还是旧版）：
+
+```powershell
+$src = "D:\Users\boosn\周国强工作\Deepseek Harness\临时\motion-ledger"
+$dst = "D:\Users\boosn\.dsh\skills\motion-ledger"
+Remove-Item -Recurse -Force $dst -ErrorAction SilentlyContinue
+& "C:\Program Files\Git\cmd\git.exe" -C $src ls-files | ForEach-Object {
+  $t = Join-Path $dst $_
+  New-Item -ItemType Directory -Force (Split-Path $t) | Out-Null
+  Copy-Item (Join-Path $src $_) $t
+}
+```
+
 ---
 
 ## 目录
@@ -204,6 +234,8 @@ node scripts/publish.mjs --dry    # 只检查不提交
 ```
 motion-ledger/
 ├── SKILL.md                        ← agent 读这个（主入口）
+├── docs/
+│   └── ARCHITECTURE.md             四层架构、每层边界、Concat 位置（中英双语）
 ├── references/
 │   ├── 01-ledgers.md               三张台账的完整规则
 │   ├── 02-playbooks.md             9 类元素：怎么建 / 怎么动 / 常见失败
@@ -221,6 +253,7 @@ motion-ledger/
 │   ├── film.mjs                    MP4 体检
 │   ├── spec.mjs                    台账与源码审计
 │   ├── selftest.mjs                门禁自测（11 条断言）
+│   ├── sync.mjs                    两份 score.mjs 是否仍一致（防漂移）
 │   └── lib.mjs                     共用工具
 ├── templates/
 │   ├── remotion-starter/           ← 主推：Remotion + React + SVG（已跑通出片）
@@ -233,11 +266,14 @@ motion-ledger/
 │   │   └── scripts/check.mjs       项目内自查
 │   └── node-starter/               备选：纯 Node 光栅器，零 npm 依赖
 ├── examples/
-│   └── LEDGER.example.md           台账范例（静水流深 15s 品牌片）
+│   └── LEDGER.example.md           台账范例（教学用：带解释与对账结果）
 ├── ATTRIBUTION.md                  上游来源与许可
-├── PUBLISH.md                      推到 GitHub 的两种方式
+├── PUBLISH.md                      推送与排错
+├── README.en.md                    English
 └── LICENSE                         MIT
 ```
+
+**两份台账不要混**：`examples/LEDGER.example.md` 是**教学范例**（带逐条解释、回写源码示例、对账结果），`templates/*/LEDGER.md` 是**门禁输入**（真实片子用的，含峰值/静止声明表）。要抄格式抄后者，要理解规则读前者。
 
 **两条渲染路线怎么选**：
 

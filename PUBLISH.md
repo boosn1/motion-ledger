@@ -156,14 +156,16 @@ $git = "C:\Program Files\Git\cmd\git.exe"
 - **新增 playbook 类型时，同时更新 `02-playbooks.md` 和 `01-ledgers.md` 的 E 表类型列。**
 - **阈值（首帧差 6、SSIM 0.97、尖峰 4×中位、死区 1.5s）是经验值。** 改之前先跑 selftest 确认反例仍然会红。
 - **改了 `templates/` 下的 starter 后，重跑两条路线出片 + 门禁。** 否则 README 里「已跑通」这句话会过期。
-- **同步到 `C:\Users\boosn\.hub\skills\motion-ledger\`。** 那是 DSH 实际读取 skill 的目录，仓库和它不一致时，agent 读到的是旧规则。
+- **同步到 `D:\Users\boosn\.dsh\skills\motion-ledger\`。** 那是 DSH 实际读取 skill 的目录（`$DSH_HOME/skills`，本机 `DSH_HOME=D:\Users\boosn\.dsh`），仓库和它不一致时，agent 读到的是旧规则。
+
+  > 注意盘符：本机 `DSH_HOME` 在 **D 盘**。查 `C:\Users\<你>\.dsh` 会得出「不存在」的错误结论——这个坑已经踩过一次。用 `$env:DSH_HOME` 拿，别硬编码。
 
 最后一条可以机械化：
 
 ```powershell
 # 用 git ls-files 逐文件复制，避免带进 node_modules / out / .git
 $src = "D:\Users\boosn\周国强工作\Deepseek Harness\临时\motion-ledger"
-$dst = "C:\Users\boosn\.hub\skills\motion-ledger"
+$dst = Join-Path $env:DSH_HOME "skills\motion-ledger"
 $git = "C:\Program Files\Git\cmd\git.exe"
 cd $src
 & $git ls-files | ForEach-Object {

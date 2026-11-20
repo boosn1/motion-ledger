@@ -250,6 +250,7 @@ node verify/film.mjs --film out/film.mp4 --spec src/spec.ts
 
 | 何时读 | 文件 |
 |---|---|
+| 想知道这套流程分几层、每层边界在哪、Concat 站在哪 | `docs/ARCHITECTURE.md` |
 | 写台账 / 对账 | `references/01-ledgers.md` |
 | 设计某个元素 | `references/02-playbooks.md` |
 | 定时值 / 选视觉语法 / 排注意力 | `references/03-timing-and-grammar.md` |
@@ -259,6 +260,8 @@ node verify/film.mjs --film out/film.mp4 --spec src/spec.ts
 | 想知道为什么这么设计 | `references/07-competitive-map.md` |
 | 成片之后要字幕 / 多轨 / 混音 / 交付 | `references/08-delivery.md` |
 | 判断一个需求该不该用这套流程 | `references/09-capabilities.md` |
+
+**四层怎么分**：纪律（台账）→ 工艺（怎么设计）→ 门禁（能不能被证明）→ 交付（能不能发出去）。每一层只解决自己的问题，越界的活交给下一层。`docs/ARCHITECTURE.md` 里写了每层「不管什么」，那部分比「管什么」更常被违反。
 
 ---
 

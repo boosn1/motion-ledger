@@ -70,6 +70,7 @@ const fail = (...xs) => { process.stderr.write(xs.join(' ') + '\n'); };
 
 const GATES = [
   { name: '门禁自测', args: ['verify/selftest.mjs'], why: '门禁自己坏了，后面全部结论都不可信' },
+  { name: '配乐脚本一致', args: ['verify/sync.mjs'], why: '两份 score.mjs 分叉后，两条路线的音色会悄悄不同' },
   {
     name: '台账对账 · remotion-starter',
     args: ['verify/spec.mjs', '--ledger', 'templates/remotion-starter/LEDGER.md', '--src', 'templates/remotion-starter/src'],
