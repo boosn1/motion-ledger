@@ -98,3 +98,57 @@ export function scatterPositions(seed = 1337): Pt[] {
 
 /** 超椭圆指数插值：让方块在变成弧的过程中"收口"——这是结构在变，不是缩放 */
 export const easeExp = (from: number, to: number, p: number) => lerp(from, to, p);
+
+/* ═══════════ 球面暗面（月牙形，不是偏移圆盘）═══════════
+ *
+ * 反面教材：把球的点数组切掉一半、整体偏移一点填深色——得到的是一个
+ * **凸出球外的硬边圆盘**，观众看到一块贴上去的饼，不是球有体积。
+ *
+ * 正确的暗面是**两个圆的差集（lune）**：球面圆 减去 光源偏移后的亮面圆。
+ * 边界由两段弧组成——球自己的外缘（远侧）+ 明暗交界线（terminator）。
+ * 交界线是**弧**不是直线，球才有体积。
+ *
+ * @param kx,ky  亮面圆心的偏移方向（单位向量）
+ * @param pull   亮面圆偏移多远（相对 r）
+ */
+export function sphereShadePts(
+  cx: number,
+  cy: number,
+  r: number,
+  kx = 0.42,
+  ky = 0.38,
+  pull = 0.62,
+  n = N
+): Pt[] {
+  const d = pull * r;
+  const r2 = r; // 同半径才形成标准月牙
+  // 两圆交点（局部坐标里亮面圆在 +x 方向）
+  const x = (d * d + r * r - r2 * r2) / (2 * d);
+  const y = Math.sqrt(Math.max(0, r * r - x * x));
+  const a1 = Math.atan2(y, x);
+  const rot = Math.atan2(ky, kx);
+  const half = Math.floor(n / 2);
+  const pts: Pt[] = [];
+
+  // ① 球的外缘：从 a1 绕远侧走到 a2（跨过 π 那一侧）
+  for (let i = 0; i <= half; i++) {
+    const k = i / half;
+    const a = a1 + (Math.PI * 2 - 2 * a1) * k;
+    const la = a + rot;
+    pts.push([cx + Math.cos(la) * r, cy + Math.sin(la) * r] as Pt);
+  }
+  // ② 交界线：沿亮面圆回到起点（走球内部那侧短弧）
+  for (let i = 0; i <= half; i++) {
+    const k = i / half;
+    const b1 = Math.atan2(-y, x - d);
+    const b2 = Math.atan2(y, x - d);
+    let delta = b1 - b2;
+    while (delta > Math.PI) delta -= Math.PI * 2;
+    while (delta < -Math.PI) delta += Math.PI * 2;
+    const b = b2 + delta * k;
+    const lx = d + Math.cos(b) * r2;
+    const ly = Math.sin(b) * r2;
+    pts.push([cx + lx * Math.cos(rot) - ly * Math.sin(rot), cy + lx * Math.sin(rot) + ly * Math.cos(rot)] as Pt);
+  }
+  return pts;
+}

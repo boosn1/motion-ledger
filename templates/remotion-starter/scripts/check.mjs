@@ -2,7 +2,7 @@
 // check.mjs — 抽帧自查。**信 stills 胜过信代码。**
 //
 //   node scripts/check.mjs
-//   TIMES="0,2.5,4.2,7.5,11,14.9" node scripts/check.mjs
+//   TIMES="1.2,3.0,13.4,25.0,30.2,38.0,41.0,47.5,53.0" node scripts/check.mjs
 //
 // 产出 out/check/：
 //   sheet.png    关键时刻拼图
@@ -45,7 +45,7 @@ function readPeakWindows() {
 
 const peakWindows = readPeakWindows();
 
-const DEFAULT_TIMES = '0,2.5,4.2,7.5,11,14.9';
+const DEFAULT_TIMES = '1.2,3.0,13.4,25.0,30.2,38.0,41.0,47.5,53.0'; // 示例片 60s 用；换片子请用 TIMES= 覆盖
 const times = (process.env.TIMES || DEFAULT_TIMES)
   .split(',')
   .map((s) => Number(s.trim()))
@@ -122,12 +122,23 @@ if (stills.length >= 2) {
 }
 
 /* ── 4. 运动曲线 ── */
-const SAMPLES = 96;
+// 采样密度必须跟片长走，不能写死。
+//
+// starter 里是 SAMPLES = 96：对 15 秒片是每 0.16 秒一个采样，够用；
+// 对 60 秒片变成每 0.63 秒一个，两帧之间隔了 19 帧——入场、换字幕、元素滑入
+// 全被压进一个采样间隔里，于是每一次「采样点正好跨过一段运动」都被判成尖峰。
+// 实测：60 秒片用 96 采样报 2 处假尖峰，用逐帧采样（这里 1 秒 = 30 采样）全部消失。
+//
+// 所以：采样数 = 片长 × 15，下限 96、上限 1800。这样 15 秒片仍是 225（≥96 原行为），
+// 60 秒片是 900，1 秒 15 个采样——足够看清每一次入场，又不至于把整片抽成逐帧（那太慢）。
+const SAMPLES = Math.max(96, Math.min(1800, Math.round(dur * 15)));
+const SW = 96;
+const SH = 54;
 const grays = [];
 for (let i = 0; i < SAMPLES; i++) {
   const t = (i / (SAMPLES - 1)) * Math.max(0, dur - 0.05);
-  const r = run('ffmpeg', ['-v', 'error', '-ss', String(t), '-i', FILM, '-frames:v', '1', '-vf', 'scale=64:36,format=gray', '-f', 'rawvideo', '-']);
-  if (r.status === 0 && r.stdout && r.stdout.length >= 64 * 36) grays.push(r.stdout);
+  const r = run('ffmpeg', ['-v', 'error', '-ss', String(t), '-i', FILM, '-frames:v', '1', '-vf', `scale=${SW}:${SH},format=gray`, '-f', 'rawvideo', '-']);
+  if (r.status === 0 && r.stdout && r.stdout.length >= SW * SH) grays.push(r.stdout);
 }
 
 if (grays.length >= 8) {
@@ -136,22 +147,24 @@ if (grays.length >= 8) {
     const a = grays[i - 1];
     const b = grays[i];
     let sum = 0;
-    for (let k = 0; k < 64 * 36; k++) sum += Math.abs(a[k] - b[k]);
-    vals.push(sum / (64 * 36));
+    for (let k = 0; k < SW * SH; k++) sum += Math.abs(a[k] - b[k]);
+    vals.push(sum / (SW * SH) / 255);
   }
-  writeFileSync(resolve(CHECK, 'motion.txt'), vals.map((v) => v.toFixed(3)).join('\n'), 'utf8');
+  writeFileSync(resolve(CHECK, 'motion.txt'), vals.map((v) => v.toFixed(6)).join('\n'), 'utf8');
 
   const sorted = [...vals].sort((x, y) => x - y);
   const med = sorted[Math.floor(sorted.length / 2)];
+  const step = Math.max(0, dur - 0.05) / (vals.length - 1);
 
-  if (med <= 0.01) {
-    failures.push(`整片几乎静止（中位帧差 ${med.toFixed(3)}）——会被当成 PPT`);
+  if (med <= 0.01 / 255) {
+    failures.push(`整片几乎静止（中位帧差 ${med.toExponential(2)}）——会被当成 PPT`);
   } else {
-    passes.push(`运动中位 ${med.toFixed(3)}`);
+    passes.push(`运动中位 ${med.toExponential(2)}（${SAMPLES} 采样 / 每 ${step.toFixed(2)}s 一个）`);
   }
 
-  const spikes = vals.map((v, i) => ({ v, i, t: (i / (vals.length - 1)) * Math.max(0, dur - 0.05) }))
-    .filter(({ v }) => v > 4 * med && v > 1);
+  const spikes = vals
+    .map((v, i) => ({ v, t: (i + 1) * step }))
+    .filter(({ v }) => v > 4 * med);
 
   if (spikes.length) {
     // 台账声明了窗口就只抓窗口外的；没声明就全部算计划外（严格模式）
@@ -160,10 +173,9 @@ if (grays.length >= 8) {
       : spikes;
 
     if (unplanned.length) {
-      const worst = unplanned.sort((a, b) => b.v - a.v)[0];
-      failures.push(
-        `${unplanned.length} 处计划外尖峰（最猛在 t=${worst.t.toFixed(2)}s，${worst.v.toFixed(2)}）`
-      );
+      const list = [...unplanned].sort((a, b) => b.v - a.v);
+      const detail = list.map((s) => s.t.toFixed(2) + 's(' + (s.v / med).toFixed(0) + 'x)').join(' ');
+      failures.push(`${list.length} 处计划外尖峰：${detail}`);
     } else {
       passes.push(`${spikes.length} 处尖峰全部落在台账声明区间内`);
     }
@@ -171,7 +183,7 @@ if (grays.length >= 8) {
     passes.push('无计划外尖峰');
   }
 
-  const stillThr = med * 0.06;
+  const stillThr = Math.max(med * 0.06, 1e-5);
   let runLen = 0;
   let maxStill = 0;
   for (const v of vals) {
@@ -180,15 +192,15 @@ if (grays.length >= 8) {
       maxStill = Math.max(maxStill, runLen);
     } else runLen = 0;
   }
-  if (maxStill > vals.length * 0.2) {
-    failures.push(`有 ${maxStill}/${vals.length} 个采样连续几乎不动（死区）`);
+  const stillSec = maxStill * step;
+  if (stillSec > 1.5) {
+    failures.push(`最长静止 ${stillSec.toFixed(2)}s > 1.5s（死区）`);
   } else {
-    passes.push('无长死区');
+    passes.push(`无长死区（最长 ${stillSec.toFixed(2)}s）`);
   }
 } else {
   failures.push('抽不到足够帧，运动曲线不可信');
 }
-
 /* ── 5. 音频 ── */
 const audioProbe = run('ffprobe', ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=codec_name', '-of', 'csv=p=0', FILM]);
 if (audioProbe.text.trim()) {
