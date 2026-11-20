@@ -1,0 +1,27 @@
+# 依赖
+node_modules/
+
+# 产物：成片、配乐、抽帧、拼图都随时可以重新生成，不进仓库
+out/
+*.mp4
+*.wav
+*.png
+*.jpg
+*.jpeg
+*.gif
+
+# 但文档里的配图是资产，要留
+!docs/**/*.png
+!docs/**/*.jpg
+!docs/**/*.gif
+
+# Remotion 渲染临时目录（把 TEMP 指到工作区内时产生）
+.rtmp/
+react-motion-render*/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log

@@ -1,0 +1,13 @@
+# 统一换行：仓库里一律 LF，检出时按平台。
+# 门禁脚本里正则与模板字符串都按 LF 写的，CRLF 混进来会让行号对不上。
+* text=auto eol=lf
+
+# 二进制：不要做换行转换
+*.wav  binary
+*.mp4  binary
+*.png  binary
+*.jpg  binary
+*.gif  binary
+
+# lockfile 不做 diff 展示（太长，看不出信息）
+package-lock.json  -diff

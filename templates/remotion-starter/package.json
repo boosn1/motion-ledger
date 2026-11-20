@@ -1,0 +1,26 @@
+{
+  "name": "motion-ledger-remotion-starter",
+  "version": "1.0.0",
+  "private": true,
+  "description": "motion-ledger 的 Remotion 起点。改 src/spec.ts 与 src/scenes/，别改 src/lib/ 与 scripts/。",
+  "scripts": {
+    "studio": "remotion studio",
+    "preview": "remotion render Film out/preview.mp4 --scale=0.5",
+    "render": "remotion render Film out/film.mp4",
+    "check": "node scripts/check.mjs",
+    "score": "node scripts/score.mjs --cues scripts/cues.json --out public/score.wav",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.545",
+    "@remotion/google-fonts": "4.0.545",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "remotion": "4.0.545"
+  },
+  "devDependencies": {
+    "@types/react": "19.1.0",
+    "@types/react-dom": "19.1.0",
+    "typescript": "5.9.2"
+  }
+}

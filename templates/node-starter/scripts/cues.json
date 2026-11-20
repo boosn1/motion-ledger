@@ -1,0 +1,22 @@
+{
+  "duration": 4,
+  "bpm": 90,
+  "loop": false,
+  "palette": ["pad", "pluck", "tick"],
+  "bed": [
+    { "at": 0, "dur": 4, "inst": "pad", "notes": [146.83, 220, 293.66], "gain": 0.15 }
+  ],
+  "patterns": [
+    { "inst": "pluck", "every": 0.667, "notes": [293.66, 349.23, 440], "from": 0.667, "to": 3.0, "gain": 0.18 }
+  ],
+  "events": [
+    { "at": 0.6, "inst": "tick", "gain": 0.28 },
+    { "at": 0.8, "inst": "tick", "gain": 0.28 },
+    { "at": 1.0, "inst": "tick", "gain": 0.28 },
+    { "at": 1.2, "inst": "tick", "gain": 0.28 },
+    { "at": 1.4, "inst": "tick", "gain": 0.28 },
+    { "at": 2.0, "inst": "whoosh", "gain": 0.42 },
+    { "at": 3.0, "inst": "drop", "gain": 0.38 },
+    { "at": 3.0, "inst": "bell", "gain": 0.45, "note": 69 }
+  ]
+}
