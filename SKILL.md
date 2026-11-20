@@ -263,6 +263,8 @@ node verify/film.mjs --film out/film.mp4 --spec src/spec.ts
 
 **四层怎么分**：纪律（台账）→ 工艺（怎么设计）→ 门禁（能不能被证明）→ 交付（能不能发出去）。每一层只解决自己的问题，越界的活交给下一层。`docs/ARCHITECTURE.md` 里写了每层「不管什么」，那部分比「管什么」更常被违反。
 
+**`src/lib/motion.tsx` 不在四层里**：它决定「东西在哪、怎么动」，不决定「长什么样」——是机制不是设计。它不许改，因为一改门禁的读数就不可比（运动曲线、`EASE.*` 的闭式解、`rand` 的种子复现全部依赖它稳定）。要改行为，改 `src/spec.ts` 的数值和 `src/scenes/` 的实现。详见 `docs/ARCHITECTURE.md` 的「motion.tsx 是什么」一节。
+
 ---
 
 ## 交付之后（可选，但推荐）

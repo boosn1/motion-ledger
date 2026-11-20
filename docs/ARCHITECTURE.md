@@ -35,6 +35,14 @@
 │  产出：final.mp4                                          │
 │  审计：ffprobe 验流 + 抽帧目视                             │
 └──────────────────────────────────────────────────────────┘
+════════════════ 地基（不属于任何一层）════════════════════
+   src/lib/motion.tsx        纯 Node 路线：src/lib/motion-core.mjs
+   时间 useTime/prog/settle · 缓动 EASE · 节拍 beats
+   确定性随机 rand/wobble · 形状与逐点变形 morphPts/chain/converge
+   角色骨架 rig/grip/poseMix/walk · 质感 roughFor
+   组件 Stage/Reveal/Letters/Counter
+   → 决定「东西在哪、怎么动」，永不决定「长什么样」
+═══════════════════════════════════════════════════════════
 ```
 
 ---
@@ -83,6 +91,63 @@
 成片 ≠ 交付物。真实交付还要字幕、多轨、转场、配音、混音、按平台改比例。
 
 这些事在代码里做不是不能做，是**不值得**：改一个字要重渲整片（几分钟），而剪辑器里拖一下就好。
+
+---
+
+## motion.tsx 是什么，为什么它不属于任何一层
+
+架构图底部那条「地基」就是它：`templates/remotion-starter/src/lib/motion.tsx`（374 行，纯 Node 路线对应 `src/lib/motion-core.mjs`）。
+
+**它不产出任何设计决定，所以它不在四层里。** 四层的每一层都在回答「这支片该是什么样」——台账记需求、工艺定风格、门禁验对错、交付管出口。`motion.tsx` 一个都不回答。它回答的是另一个问题：
+
+> **给定一个时间 `t`，一个点该在哪、一个角度该是多少。**
+
+这是**机制**，不是**设计**。它的文件头第一句就写着：
+
+```
+// 它决定东西**在哪、怎么动**，永远不决定**长什么样**。
+// 交付时不许把这里的中性默认值（方盒子、火柴人、系统字体）当成品。
+```
+
+### 它提供什么
+
+| 组 | 导出 | 干什么 |
+|---|---|---|
+| 时间 | `useTime()` · `prog(t,start,dur,ease)` · `settle(t,fps,landing,{lead,dur,bounce})` | 把绝对秒变成 0–1 进度；落地时的过冲与回弹 |
+| 缓动 | `EASE.linear/out/in/inOut/back` · `smooth` · `clamp` · `lerp` | 精确的缓动曲线（不用 Remotion 自带 `Easing.exp`，它起点不为 0 会漏隐藏图层） |
+| 节拍 | `beats(bpm)` → `.beat/.at(n)/.bar(n)/.index(t)/.nearest` | 让事件落在拍上，而不是"大概那个位置" |
+| 确定性随机 | `rand(seed)` · `makeRand` · `wobble(seed,i,t)` · `stepped(t,perSecond)` | 同 seed 恒同结果；替代 `Math.random()` |
+| 形状 | `circle` · `polygon` · `line` · `toPath` · `drawOn` | 生成点序列 |
+| **逐点变形** | `morphPts(a,b,p)` · `morphPath` · `chain(t,segs)` · `converge(t,items,target)` | **这条管线的技术核心**：同点数逐点插值 = 真变形，不是交叉淡化 |
+| 颜色 | `shadeHex(hex,k)` | 同一色相的明暗，避免引入新颜色 |
+| 角色 | `Body` · `Pose` · `rig` · `grip` · `nearSide` · `poseMix` · `walk` | 骨架解算；`grip()` 算出手在道具上的位置，`rig()` 保证脚落地 |
+| 质感 | `roughFor(sizePx,strength)` | 按尺寸缩放墨边粗糙度（小字不糊，大字不僵） |
+| 组件 | `Stage` · `Reveal` · `Letters` · `Counter` | 满屏容器、硬边擦除、逐字入场（保留空格）、数字滚动 |
+
+### 为什么它必须"不许改"
+
+因为它一旦变了，**门禁的结论就不再可比**。
+
+- `film.mjs` 量的是运动曲线。如果每支片的缓动实现都不同，"4× 中位帧差"这个阈值就失去意义——上一支片的尖峰和这一支片的尖峰不是同一个东西。
+- `EASE.*` 是闭式解（给定 `t` 直接算，不积分、不读前一帧）。Remotion 抽帧渲染要 seek 到任意时刻得到同一画面，任何积分式的实现都会在 seek 时错位。
+- `rand/wobble` 是有种子的。换成 `Math.random()` 后同一段代码渲两遍不一样，门禁的抽帧比对全部失效。
+
+**要改行为，改 `src/spec.ts` 的数值和 `src/scenes/` 的实现。** 那两处才是设计决定所在。
+
+### 它在两条路线里的位置
+
+| | Remotion 路线 | 纯 Node 路线 |
+|---|---|---|
+| 文件 | `src/lib/motion.tsx` | `src/lib/motion-core.mjs` |
+| 依赖 | React + Remotion API（`useCurrentFrame`/`useVideoConfig`） | 零依赖，纯函数 |
+| 组件 | 有（`Stage`/`Reveal`/`Letters`/`Counter` 返回 JSX） | 无（只有计算） |
+| 数学层 | 完全相同 | 完全相同 |
+
+两条路线的数学层是同一套（`morphPts`/`chain`/`converge`/`rig`/`EASE` 逐行对应）。差别只在"怎么把结果画出来"：一条交给 React 渲染 SVG，一条交给手写光栅器填像素。
+
+### 一句话
+
+**四层是"做决定"的流程，`motion.tsx` 是"执行决定"的地基。** 地基不参与决策，但地基一变，上面所有审计点的读数都不可比——所以它被划成不许改的那一部分。
 
 ---
 
@@ -162,6 +227,7 @@ final.mp4（字幕/多轨/混音）
 | 2 工艺 | `references/02-playbooks.md` · `03-timing-and-grammar.md` · `06-sound.md` |
 | 3 门禁 | `verify/lib.mjs` · `spec.mjs` · `film.mjs` · `selftest.mjs` · `sync.mjs`（两份配乐脚本是否还一致）· `references/05-review.md` |
 | 4 交付 | `scripts/concat-bridge.mjs` · `references/08-delivery.md` |
+| **地基（不属于任何层）** | `templates/remotion-starter/src/lib/motion.tsx` · `templates/node-starter/src/lib/motion-core.mjs` — 机制，不是设计；不许改 |
 | 横切 | `references/04-engineering-contract.md`（渲染契约，两层共用）· `07-competitive-map.md`（选型依据）· `09-capabilities.md`（该不该用这套） |
 | 维护 | `scripts/publish.mjs`（改完即推）· `PUBLISH.md`（出问题时怎么查） |
 | 总览 | `README.md`（中文）· `README.en.md`（English）· 本文件（架构与边界） |
@@ -193,7 +259,70 @@ This is not a prompt template. It is a **pipeline with audit points**.
                   audit: verify/selftest.mjs proves the gates can go red as well as green
 4. DELIVERY    ── subtitles · multi-track · transitions · voice alignment · mix · platform ratios
                   output: final.mp4          audit: ffprobe stream check + visual spot check
+════════════════ FOUNDATION (belongs to no layer) ════════════════════
+   src/lib/motion.tsx        pure-Node route: src/lib/motion-core.mjs
+   time useTime/prog/settle · easing EASE · beats beats
+   deterministic random rand/wobble · shapes and point-wise morph morphPts/chain/converge
+   character rig rig/grip/poseMix/walk · texture roughFor
+   components Stage/Reveal/Letters/Counter
+   → decides WHERE things are and HOW they move; never WHAT they look like
+══════════════════════════════════════════════════════════════════════
 ```
+
+## What motion.tsx is, and why it belongs to no layer
+
+The foundation strip at the bottom of the diagram is `templates/remotion-starter/src/lib/motion.tsx` (374 lines; `src/lib/motion-core.mjs` on the pure-Node route).
+
+**It produces no design decision, which is why it sits outside the four layers.** Every layer answers "what should this film be" — the ledger records the brief, craft fixes the style, gates prove correctness, delivery handles the exit. `motion.tsx` answers none of those. It answers a different question:
+
+> **Given a time `t`, where is a point, and how large is an angle.**
+
+That is *mechanism*, not *design*. Its own header says so:
+
+```
+// It decides WHERE things are and HOW they move; it never decides WHAT they look like.
+// Do not ship its neutral defaults (plain boxes, stick figures, system fonts) as the finished look.
+```
+
+### What it provides
+
+| Group | Exports | Purpose |
+|---|---|---|
+| Time | `useTime()` · `prog(t,start,dur,ease)` · `settle(t,fps,landing,{lead,dur,bounce})` | absolute seconds → 0–1 progress; landing overshoot and settle |
+| Easing | `EASE.linear/out/in/inOut/back` · `smooth` · `clamp` · `lerp` | exact curves (not Remotion's own `Easing.exp`, whose start is not exactly 0 and drops hidden layers) |
+| Beats | `beats(bpm)` → `.beat/.at(n)/.bar(n)/.index(t)/.nearest` | land events on the beat instead of "roughly there" |
+| Deterministic random | `rand(seed)` · `makeRand` · `wobble(seed,i,t)` · `stepped(t,perSecond)` | same seed, same result; replaces `Math.random()` |
+| Shapes | `circle` · `polygon` · `line` · `toPath` · `drawOn` | point sequences |
+| **Point-wise morph** | `morphPts(a,b,p)` · `morphPath` · `chain(t,segs)` · `converge(t,items,target)` | **the technical core**: same point count, interpolated per point = a real morph, not a cross-fade |
+| Colour | `shadeHex(hex,k)` | light and dark of the same hue, no new colours |
+| Character | `Body` · `Pose` · `rig` · `grip` · `nearSide` · `poseMix` · `walk` | skeletal solve; `grip()` puts the hand on the prop, `rig()` keeps the feet on the ground |
+| Texture | `roughFor(sizePx,strength)` | scale ink-edge roughness by size (small type stays sharp, large type is not stiff) |
+| Components | `Stage` · `Reveal` · `Letters` · `Counter` | full-frame container, hard-edge wipe, per-glyph entrance (spaces preserved), digit roll |
+
+### Why it must not be modified
+
+Because if it changes, **the gates' readings stop being comparable**.
+
+- `film.mjs` measures the motion curve. If every film eases differently, the "4× median frame delta" threshold loses meaning — last film's spike and this film's spike are not the same quantity.
+- `EASE.*` are closed-form (given `t`, compute directly; no integration, no reading the previous frame). Remotion's frame-seek rendering must produce the same picture at any timestamp; an integrative implementation would drift under seek.
+- `rand/wobble` are seeded. Swap in `Math.random()` and the same code renders differently twice, so every still-comparison in the gates fails.
+
+**To change behaviour, change the values in `src/spec.ts` and the implementation in `src/scenes/`.** Those are where design decisions live.
+
+### Where it sits on the two routes
+
+| | Remotion route | Pure-Node route |
+|---|---|---|
+| File | `src/lib/motion.tsx` | `src/lib/motion-core.mjs` |
+| Depends on | React + Remotion API (`useCurrentFrame`/`useVideoConfig`) | nothing, pure functions |
+| Components | yes (`Stage`/`Reveal`/`Letters`/`Counter` return JSX) | no (computation only) |
+| Maths | identical | identical |
+
+The maths layer is the same on both routes (`morphPts`/`chain`/`converge`/`rig`/`EASE` correspond line for line). Only "how the result is drawn" differs: React renders SVG on one, a hand-written rasteriser fills pixels on the other.
+
+### One sentence
+
+**The four layers are the process that makes decisions; `motion.tsx` is the foundation that executes them.** The foundation takes no part in deciding, but change it and every audit reading above it becomes incomparable — which is why it is on the do-not-modify list.
 
 ## Boundaries
 

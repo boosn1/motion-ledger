@@ -43,9 +43,18 @@ A weak model skips all six — and does not notice it skipped them. The output r
 │  captions · multi-track · transitions · mix · aspect      │
 │  produces final.mp4            audited by ffprobe + stills│
 └──────────────────────────────────────────────────────────┘
+════════════════ FOUNDATION (belongs to no layer) ════════════════════
+  src/lib/motion.tsx   decides WHERE things are and HOW they move,
+                       never WHAT they look like
+  time/easing/beats · point-wise morph morphPts · character rig · components
+  → mechanism, not design: that is why it is outside the layers,
+    and precisely why it is on the do-not-modify list
+══════════════════════════════════════════════════════════════════════
 ```
 
 **The difference that matters**: comparable skills have the model grade its own work, which carries built-in confirmation bias. This project moves everything mechanically decidable into code — motion curves, an anti-slideshow gate, ledger coverage, banned-item scanning. None of it relies on the model being honest.
+
+**Why `motion.tsx` is not one of the four layers**: all four layers answer "what should this film be", while it answers "given time t, where is a point". That is mechanism, not design. Change it and every gate reading stops being comparable — the motion curve `film.mjs` measures, the closed-form `EASE.*` curves, the seed-reproducibility of `rand` all lose their footing. So it is classed as a foundation you do not modify.
 
 What each layer owns, what it does *not* own, where the boundaries are, and **why four layers rather than three or five**, is in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (bilingual).
 
