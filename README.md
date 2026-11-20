@@ -144,6 +144,61 @@ node verify/selftest.mjs
 
 ---
 
+## 能做什么（按把握度排序）
+
+| 类型 | 把握 | 说明 |
+|---|---|---|
+| 品牌/产品动效片 15–60s | 最大 | 元素有明确来路去处，代码逐帧确定，无漂移 |
+| 数据动画 / 图表变形 | 很大 | 数值全部原文引用，门禁查覆盖率 |
+| 动态文字 / Logo 演绎 | 很大 | 矢量无模糊边界，CJK 竖排与字距都能算准 |
+| 讲解片 / Explainer | 中上 | 有旁白时间轴时按词级排镜；纯手绘插画风格做不了 |
+| UI / 产品演示 | 中 | 要真截图；手搓假界面一眼假 |
+| 风格化艺术动画 | 中 | 纸墨/半调/拼贴可以；真厚涂油画不行 |
+| 角色短片 | 最低 | 能走位能换姿势，保证不了表演（原项目自测相似度仅 0.40–0.49） |
+
+**不能做**：真人拍摄、剪辑现成素材、加字幕（这些用剪辑软件）、写实画面生成（用图像模型）、语音合成、2 分钟以上的长叙事。
+
+一条判断规则：**难点是「精确」还是「质感」？** 精确（数值、形状、卡拍、跨镜一致）→ 这套流程赢；质感（像画的、像拍的、有笔触）→ 这套流程输，该接图像模型。两类混在一起就分开做：质感的用模型出素材，精确的用代码排布。
+
+完整清单与成本估计见 [`references/09-capabilities.md`](references/09-capabilities.md)。
+
+---
+
+## 成片之后：接剪辑器
+
+代码出画面，剪辑器管时间线与文字。有 Concat（0.2.12+）时：
+
+```bash
+node scripts/concat-bridge.mjs --film out/film.mp4 --out final.mp4 \
+  --caption "静水流深" --caption-start 0.6 --caption-dur 3.0
+```
+
+实测输出：
+
+```
+Concat 0.2.12 · D:\Program Files\Concat\concat.exe
+导入 m1 · 15.019s · 1920×1080
+字幕「静水流深」· 0.6–3.6s
+交付 final.mp4 · 847551 bytes
+```
+
+**不要用 Concat 替代 Remotion**——那是用剪辑软件画动画，每帧手工摆位置，回到没有台账没有门禁的老路。也不要指望 Remotion 做字幕排版和配音对齐。分工见 [`references/08-delivery.md`](references/08-delivery.md)。
+
+没有 Concat 也能交付：`ffmpeg -vf subtitles=` 烧硬字幕、`-i voice.wav -shortest` 接配音、`-f concat` 拼接。
+
+---
+
+## 改完就推（纪律）
+
+```bash
+node scripts/publish.mjs          # 门禁 → 悬空引用检查 → 提交 → 推送
+node scripts/publish.mjs --dry    # 只检查不提交
+```
+
+门禁不过就拒绝提交——**坏的门禁比没有门禁更糟**，它会让后面所有结论都不可信。
+
+---
+
 ## 目录
 
 ```
@@ -156,7 +211,12 @@ motion-ledger/
 │   ├── 04-engineering-contract.md  双渲染契约（Remotion / HTML+GSAP）+ 确定性规则
 │   ├── 05-review.md                五评委 → 代码门禁映射、独立复审、禁用清单
 │   ├── 06-sound.md                 声音政策与配乐规格
-│   └── 07-competitive-map.md       同类项目横向对比（选型依据）
+│   ├── 07-competitive-map.md       同类项目横向对比（选型依据）
+│   ├── 08-delivery.md              交付层：字幕/多轨/混音/Concat 桥
+│   └── 09-capabilities.md          能做什么、不能做什么、成本估计
+├── scripts/
+│   ├── concat-bridge.mjs           成片 → Concat 剪辑器（加字幕、导出）
+│   └── publish.mjs                 门禁 → 提交 → 推送（一条命令）
 ├── verify/                         ← 门禁（零依赖）
 │   ├── film.mjs                    MP4 体检
 │   ├── spec.mjs                    台账与源码审计

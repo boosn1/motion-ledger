@@ -1,9 +1,14 @@
 ---
 name: motion-ledger
-description: 用台账驱动的纪律制作代码动效片（Remotion / HTML+GSAP），让较弱模型也做出接近强模型的效果。用户要做动效视频、品牌片、数据动画、动态文字、UI 演示、风格化艺术动画、showreel，或要求"让 DeepSeek/弱模型做出 Opus 水准的动效"时使用。核心是三张台账（需求/变形/元素）+ 先时间线后代码 + 代码门禁验收。
+description: |
+  用户要做**代码渲染的动效片**时使用：品牌片、产品/UI 演示、数据动画、动态文字、Logo 演绎、讲解片、showreel、风格化艺术动画，且要的是能导出的 MP4 而不是一段描述。
+  用户要求「让 DeepSeek / 弱模型做出接近强模型的动效」，或已有的动效项目反复偏离原始需求时，也用它。
+  核心是三张台账（需求 / 变形 / 元素）+ 先时间线后代码 + 代码门禁验收——不让模型给自己打分。
+  不用于真人拍摄、现成素材剪辑、只加字幕、写实画面生成。
+trigger-words: [动效视频, 动效片, 品牌片, 数据动画, 动态文字, Logo 演绎, 讲解片, showreel, UI 演示, motion design, kinetic typography, remotion, 让弱模型做出强模型的效果]
 ---
 
-# motion-ledger
+# motion-ledger · 动效台账
 
 你正在制作的不是"一段动画"，是**一份可核对的合同**。
 
@@ -252,3 +257,38 @@ node verify/film.mjs --film out/film.mp4 --spec src/spec.ts
 | 验收 / 复审 / 禁用清单 | `references/05-review.md` |
 | 配乐 / 声音 | `references/06-sound.md` |
 | 想知道为什么这么设计 | `references/07-competitive-map.md` |
+| 成片之后要字幕 / 多轨 / 混音 / 交付 | `references/08-delivery.md` |
+| 判断一个需求该不该用这套流程 | `references/09-capabilities.md` |
+
+---
+
+## 交付之后（可选，但推荐）
+
+成片出来不等于能发。字幕、多轨、配音对齐、混音这些事在代码里做不值得——重渲一次几分钟，改一个字也要等。
+
+有 Concat（0.2.12+）时用桥接脚本，一条命令把成片接进剪辑器：
+
+```bash
+node scripts/concat-bridge.mjs --film out/film.mp4 --out final.mp4 \
+  --caption "静水流深" --caption-start 0.6 --caption-dur 3.0
+```
+
+分工是明确的：**motion-ledger 管「这一帧长什么样」，Concat 管「什么时候出现、上面写什么字」**。不要用 Concat 替代 Remotion（那是用剪辑软件画动画），也不要指望 Remotion 做字幕排版和配音对齐。详见 `references/08-delivery.md`。
+
+没有 Concat 也能交付：`ffmpeg -vf subtitles=` 烧硬字幕、`-i voice.wav -shortest` 接配音、`-f concat` 拼接。只是没有「拖一下就好」的手感。
+
+---
+
+## 改完之后（这条是纪律，不是建议）
+
+改完这个 skill 的任何文件，**推 GitHub 之前先跑**：
+
+```bash
+node scripts/publish.mjs
+```
+
+它会依次做四件事：跑全部门禁（自测 + 两份台账对账 + 两份成片门禁）→ 查文档里的悬空引用 → 提交 → 推送。门禁不过就拒绝提交——**坏的门禁比没有门禁更糟**，它会让后面所有结论都不可信。
+
+`--dry` 只检查不提交；`--skip-gates` 只用于纯文档改动（会警告）。
+
+为什么写成一条命令而不是写在文档里靠记性：这个仓库本身就是长期记忆，不同步就等于记忆停在某一版。纪律要能被机械执行，才叫纪律。
