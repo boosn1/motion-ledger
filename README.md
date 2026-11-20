@@ -48,7 +48,7 @@
 
 ```bash
 # 放到任意 agent 的 skills 目录
-git clone https://github.com/<you>/motion-ledger ~/.claude/skills/motion-ledger
+git clone git@github.com:boosn1/motion-ledger.git ~/.claude/skills/motion-ledger
 # 也认 .hub/skills、.agents/skills、.codebuddy/skills 等
 ```
 
