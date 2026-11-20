@@ -134,7 +134,7 @@ function checkDanglingRefs() {
   const docs = ['README.md', 'SKILL.md', 'PUBLISH.md', 'ATTRIBUTION.md',
     'references/01-ledgers.md', 'references/02-playbooks.md', 'references/03-timing-and-grammar.md',
     'references/04-engineering-contract.md', 'references/05-review.md', 'references/06-sound.md',
-    'references/07-competitive-map.md'];
+    'references/07-competitive-map.md', 'references/08-delivery.md', 'references/09-capabilities.md'];
   const bad = [];
   // 只查带路径分隔符的引用。裸文件名（`spec.ts`、`cues.json`）在正文里是
   // 泛指的「那个文件」，可能属于仓库根、某个 starter、或某个 examples 目录——
