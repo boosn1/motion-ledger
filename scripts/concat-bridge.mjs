@@ -8,8 +8,17 @@
 //
 // 用法：
 //   node scripts/concat-bridge.mjs --film out/film.mp4 --out final.mp4
-//   node scripts/concat-bridge.mjs --film out/film.mp4 --out final.mp4 --caption "静水流深" --caption-start 0.5 --caption-dur 3
-//   node scripts/concat-bridge.mjs --film out/film.mp4 --out final.mp4 --json    // 输出机器可读结果
+//   node scripts/concat-bridge.mjs --film out/film.mp4 --out final.mp4 --subs subs.srt
+//   node scripts/concat-bridge.mjs --film out/film.mp4 --out final.mp4 --subs-from-spec src/spec.ts
+//   node scripts/concat-bridge.mjs --film out/film.mp4 --out final.mp4 --caption "静水流深" --caption-start 0.5
+//   node scripts/concat-bridge.mjs --film out/film.mp4 --out final.mp4 --json
+//
+// 字幕两条路（对应 references/08-delivery.md 的 Q9）：
+//   A. 烧进画面——在 Film.tsx 里画 <Subtitles />，渲染时就是像素，任何播放器都带着。
+//      好处是永不脱轨，坏处是改一个字要重渲整片，且字幕无法单独关闭。
+//   B. 交给 Concat——用本脚本的 --subs / --subs-from-spec，字幕是时间线上的一条轨。
+//      好处是改字幕不用重渲画面，坏处是最终 MP4 由 Concat 二次编码（约小 40%）。
+//   选 A 还是 B 取决于「这一版还会不会改字幕」。会改就 B，定稿就 A。
 //
 // 依赖：
 //   Concat 0.2.12+（D:\Program Files\Concat\concat.exe 或 PATH 里的 concat）。
@@ -22,11 +31,16 @@
 //   3. title_add 的文案在 style.content，不在 text 顶层。写错会得到占位符 "Your text"。
 //   4. export_start 返回 {job: "j1"}，不是 jobId。export_wait 只认 job。
 //   5. clip_add 的 start 是绝对秒；不传 ripple 时新片段不挤开旧片段，会叠上去。
+//   6. 批量字幕走 captions_add，不是循环 title_add——它的 captions 数组里每条
+//      {start, end, text} 是一个时间区间，一次落一条轨，一个 undo 步。
+//      captions_add 的 style.content 被忽略（每条用自己的 text）。
+//   7. offsetY 是「距画面中心的画幅高度比例」：0.35 = 近底部（默认），0 = 正中，-0.35 = 顶部。
+//      注意它和 fontSize 一样是比例，所以 1080p 调好的值在 4K 依然对。
 
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, copyFileSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, copyFileSync, rmSync, statSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, extname, join, resolve } from 'node:path';
 
 // ---------- 参数 ----------
 
@@ -35,10 +49,22 @@ function parseArgs(argv) {
     film: null,
     out: null,
     work: null,
+    // 单条字幕（旧行为，保留）
     caption: null,
     captionStart: 0.5,
     captionDur: 3,
-    captionSize: 0.09,
+    // 批量字幕（新）
+    subs: null,
+    subsFromSpec: null,
+    subsShift: 0,
+    subsScale: 1,
+    // 共用外观
+    captionSize: null,      // null = 按单条/批量各自的默认
+    captionOffset: 0.35,
+    captionBg: null,
+    captionMaxWidth: 0,
+    captionLineHeight: 1.2,
+    captionWeight: null,
     font: 'Noto Sans SC',
     color: '#F4F1EA',
     concat: null,
@@ -56,7 +82,16 @@ function parseArgs(argv) {
       case '--caption': a.caption = v; i++; break;
       case '--caption-start': a.captionStart = Number(v); i++; break;
       case '--caption-dur': a.captionDur = Number(v); i++; break;
+      case '--subs': a.subs = v; i++; break;
+      case '--subs-from-spec': a.subsFromSpec = v; i++; break;
+      case '--subs-shift': a.subsShift = Number(v); i++; break;
+      case '--subs-scale': a.subsScale = Number(v); i++; break;
       case '--caption-size': a.captionSize = Number(v); i++; break;
+      case '--caption-offset': a.captionOffset = Number(v); i++; break;
+      case '--caption-bg': a.captionBg = v; i++; break;
+      case '--caption-maxwidth': a.captionMaxWidth = Number(v); i++; break;
+      case '--caption-lineheight': a.captionLineHeight = Number(v); i++; break;
+      case '--caption-weight': a.captionWeight = Number(v); i++; break;
       case '--font': a.font = v; i++; break;
       case '--color': a.color = v; i++; break;
       case '--concat': a.concat = v; i++; break;
@@ -74,6 +109,93 @@ function parseArgs(argv) {
 
 const log = (...xs) => process.stdout.write(xs.join(' ') + '\n');
 
+// ---------- 字幕解析 ----------
+
+// 时间戳：SRT 用 00:00:03,600，VTT 用 00:00:03.600，也接受裸秒数 3.6
+function parseTime(s) {
+  const t = String(s).trim();
+  if (/^\d+(\.\d+)?$/.test(t)) return Number(t);
+  const m = t.match(/^(\d+):(\d{2}):(\d{2})[.,](\d{1,3})$/);
+  if (!m) throw new Error(`看不懂的时间戳：${s}`);
+  const [, h, mi, se, ms] = m;
+  return Number(h) * 3600 + Number(mi) * 60 + Number(se) + Number(ms.padEnd(3, '0')) / 1000;
+}
+
+// SRT / VTT：按空行切块，第二行是时间轴，其余是文案
+function parseSubtitleText(text, kind) {
+  const body = kind === 'vtt' ? text.replace(/^\uFEFF?WEBVTT[^\n]*\n/, '') : text;
+  const out = [];
+  for (const block of body.replace(/\r\n/g, '\n').split(/\n{2,}/)) {
+    const lines = block.split('\n').map((x) => x.trim()).filter(Boolean);
+    if (!lines.length) continue;
+    const idx = lines.findIndex((l) => l.includes('-->'));
+    if (idx < 0) continue;                      // 序号块、NOTE 块、样式块都跳过
+    const [a, b] = lines[idx].split('-->').map((x) => x.trim().split(/\s+/)[0]);
+    const txt = lines.slice(idx + 1).join('\n');
+    if (!txt) continue;
+    out.push({ start: parseTime(a), end: parseTime(b), text: txt });
+  }
+  return out;
+}
+
+// JSON：接受 [{start,end,text}] / [[a,b,'t']] / {cues|captions|subs:[...]}
+function parseSubtitleJson(text) {
+  const j = JSON.parse(text);
+  const arr = Array.isArray(j) ? j : (j.cues || j.captions || j.subs || null);
+  if (!Array.isArray(arr)) throw new Error('JSON 字幕要是一个数组，或 {cues|captions|subs: [...]}');
+  return arr.map((x) => {
+    if (Array.isArray(x)) return { start: Number(x[0]), end: Number(x[1]), text: String(x[2]) };
+    return { start: Number(x.start), end: Number(x.end), text: String(x.text) };
+  });
+}
+
+// 从 spec.ts 的 SUBS 数组里取：SUBS: Sub[] = [[3.6, 7.4, '文案'], ...]
+// 只认「数字, 数字, 单引号字符串」这一种形态——够用且不会误吃别的东西。
+function parseSubsFromSpec(path) {
+  const src = readFileSync(path, 'utf8');
+  const at = src.search(/\bSUBS\b[^=]*=\s*\[/);
+  if (at < 0) throw new Error(`${path} 里找不到 SUBS = [...]`);
+  // 从 = 之后再找 [：类型标注里也有方括号（SUBS: [number, number, string][] = [...]），
+  // 从 SUBS 本身往后找会先撞上类型标注那个 [，深度计数立刻归零，解析出 0 条。
+  const eq = src.indexOf('=', at);
+  const open = src.indexOf('[', eq);
+  let depth = 0, end = -1;
+  for (let i = open; i < src.length; i++) {
+    if (src[i] === '[') depth++;
+    else if (src[i] === ']') { depth--; if (depth === 0) { end = i; break; } }
+  }
+  if (end < 0) throw new Error('SUBS 数组没有闭合');
+  const lit = src.slice(open, end + 1);
+  const re = /\[\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*'((?:[^'\\]|\\.)*)'\s*\]/g;
+  const out = [];
+  let m;
+  while ((m = re.exec(lit))) {
+    const text = m[3].replace(/\\'/g, "'").replace(/\\\\/g, '\\').replace(/\\n/g, '\n');
+    out.push({ start: Number(m[1]), end: Number(m[2]), text });
+  }
+  if (!out.length) throw new Error(`SUBS 数组里没解析出条目（只认 [[数字, 数字, '文案']] 形态）`);
+  return out;
+}
+
+function loadSubtitles(a) {
+  if (a.subs) {
+    const p = resolve(a.subs);
+    if (!existsSync(p)) throw new Error(`找不到字幕文件：${p}`);
+    const ext = extname(p).toLowerCase();
+    const text = readFileSync(p, 'utf8');
+    const cues = ext === '.json' ? parseSubtitleJson(text)
+      : ext === '.vtt' ? parseSubtitleText(text, 'vtt')
+        : parseSubtitleText(text, 'srt');
+    return { cues, source: p };
+  }
+  if (a.subsFromSpec) {
+    const p = resolve(a.subsFromSpec);
+    if (!existsSync(p)) throw new Error(`找不到 spec 文件：${p}`);
+    return { cues: parseSubsFromSpec(p), source: p };
+  }
+  return null;
+}
+
 // ---------- 找 Concat ----------
 
 function findConcat(explicit) {
@@ -88,7 +210,6 @@ function findConcat(explicit) {
     join(process.env.ProgramFiles || 'C:\\Program Files', 'Concat', 'concat.exe'),
   ];
   for (const g of guesses) if (g && existsSync(g)) return g;
-  // 最后试 PATH
   return 'concat';
 }
 
@@ -130,11 +251,10 @@ class Concat {
       this.pending.clear();
     });
 
-    // 进程起来要一点时间；握手本身带超时，不用 sleep
     const init = await this.rpc('initialize', {
       protocolVersion: '2024-11-05',
       capabilities: {},
-      clientInfo: { name: 'motion-ledger-bridge', version: '1.0.0' },
+      clientInfo: { name: 'motion-ledger-bridge', version: '1.1.0' },
     });
     if (init.error) throw new Error(`握手失败：${init.error.message || JSON.stringify(init.error)}`);
     this.notify('notifications/initialized');
@@ -157,7 +277,6 @@ class Concat {
     this.child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method, params }) + '\n');
   }
 
-  // 调一个 MCP 工具；被拒时抛错并带上 Concat 自己的原话
   async tool(name, args) {
     const r = await this.rpc('tools/call', { name, arguments: args });
     if (r.error) throw new Error(`${name}：${r.error.message || JSON.stringify(r.error)}`);
@@ -183,14 +302,33 @@ async function main() {
   if (a.help || !a.film || !a.out) {
     log('用法: node scripts/concat-bridge.mjs --film <成片.mp4> --out <交付.mp4> [选项]');
     log('');
+    log('  片源');
     log('  --film <path>             motion-ledger 渲染出的成片（必需）');
     log('  --out <path>              最终交付路径（必需）');
+    log('');
+    log('  字幕 · 批量（推荐）');
+    log('  --subs <path>             .srt / .vtt / .json 字幕文件');
+    log('                            .json 接受 [{start,end,text}] / [[a,b,"t"]] / {cues|captions|subs:[...]}');
+    log('  --subs-from-spec <path>   直接从 spec.ts 的 SUBS 数组取（单一真相源，不用另存一份）');
+    log('  --subs-shift <秒>         整体平移，默认 0');
+    log('  --subs-scale <倍数>       时间轴整体缩放（改片长时用），默认 1');
+    log('');
+    log('  字幕 · 单条（旧行为，仍可用）');
     log('  --caption <文本>          加一条字幕');
     log('  --caption-start <秒>      字幕起点，默认 0.5');
     log('  --caption-dur <秒>        字幕时长，默认 3');
-    log('  --caption-size <比例>     字号占画幅高度的比例，默认 0.09');
+    log('');
+    log('  字幕 · 外观（两种模式共用）');
+    log('  --caption-size <比例>     字号占画幅高度比例；单条默认 0.09，批量默认 0.04');
+    log('  --caption-offset <比例>   距画面中心的比例：0.35 近底部（默认），0 居中，-0.35 顶部');
+    log('  --caption-bg <#rrggbb[aa]> 字幕底板色，带 alpha；省略 = 无底板');
+    log('  --caption-maxwidth <比例> 换行宽度，占画幅宽度比例，默认 0 = 不换行');
+    log('  --caption-lineheight <倍数> 行距倍数，默认 1.2');
+    log('  --caption-weight <100-900> 字重；单条默认 600，批量默认 600');
     log('  --font <字体名>           默认 Noto Sans SC');
     log('  --color <#rrggbb>         默认 #F4F1EA');
+    log('');
+    log('  其他');
     log('  --work <目录>             工程目录；默认在用户主目录下（headless 只许写那儿）');
     log('  --concat <path>           指定 concat.exe；默认自动找');
     log('  --timeout <秒>            导出等待上限，默认 300');
@@ -203,7 +341,20 @@ async function main() {
   const out = resolve(a.out);
   if (!existsSync(film)) throw new Error(`找不到成片：${film}`);
 
-  // headless 模式只允许写用户主目录下，所以工程默认放那儿
+  // 先解析字幕再动 Concat——字幕文件写错时不该白起一个进程
+  const subs = loadSubtitles(a);
+  const cues = subs
+    ? subs.cues
+      .map((c) => ({
+        start: Math.max(0, c.start * a.subsScale + a.subsShift),
+        end: Math.max(0, c.end * a.subsScale + a.subsShift),
+        text: c.text,
+      }))
+      .filter((c) => c.end > c.start && c.text.trim())
+      .sort((x, y) => x.start - y.start)
+    : null;
+  if (cues && !cues.length) throw new Error('字幕文件解析出 0 条有效条目');
+
   const workRoot = a.work ? resolve(a.work) : join(homedir(), '.motion-ledger-concat');
   const projectName = 'film-' + Date.now().toString(36);
   const projectDir = join(workRoot, projectName);
@@ -211,7 +362,11 @@ async function main() {
 
   const exe = findConcat(a.concat);
   const c = new Concat(exe);
-  const result = { concat: exe, project: projectDir, film, out, caption: a.caption, ok: false };
+  const result = {
+    concat: exe, project: projectDir, film, out,
+    caption: a.caption, subs: subs?.source || null, cueCount: cues?.length || 0,
+    ok: false,
+  };
 
   try {
     const info = await c.start();
@@ -236,20 +391,53 @@ async function main() {
     });
     result.clip = add.data?.createdId;
 
-    // 4) 字幕（可选）。文案必须在 style.content——放顶层会得到占位符 "Your text"。
+    // 4a) 批量字幕：一次落一条轨，一个 undo 步
+    if (cues) {
+      const style = {
+        fontFamily: a.font,
+        fontSize: a.captionSize ?? 0.04,
+        fontWeight: a.captionWeight ?? 600,
+        color: a.color,
+        align: 'center',
+        lineHeight: a.captionLineHeight,
+      };
+      if (a.captionBg) style.background = a.captionBg;
+      if (a.captionMaxWidth > 0) style.maxWidth = a.captionMaxWidth;
+
+      const r = await c.tool('captions_add', {
+        path: projectDir,
+        captions: cues,
+        offsetY: a.captionOffset,
+        style,
+      });
+      const ids = (r.data?.createdIds || r.data?.created || []);
+      result.captions = { count: cues.length, ids: Array.isArray(ids) ? ids.length : undefined };
+      if (!a.json) {
+        const first = cues[0], last = cues[cues.length - 1];
+        log(`字幕 ${cues.length} 条 · ${first.start.toFixed(2)}–${last.end.toFixed(2)}s · offsetY ${a.captionOffset}`);
+        log(`  来源 ${subs.source}`);
+      }
+    }
+
+    // 4b) 单条字幕（旧行为）
     if (a.caption) {
+      const style = {
+        content: a.caption,
+        fontFamily: a.font,
+        fontSize: a.captionSize ?? 0.09,
+        fontWeight: a.captionWeight ?? 600,
+        color: a.color,
+        align: 'center',
+        lineHeight: a.captionLineHeight,
+      };
+      if (a.captionBg) style.background = a.captionBg;
+      if (a.captionMaxWidth > 0) style.maxWidth = a.captionMaxWidth;
       const t = await c.tool('title_add', {
         path: projectDir,
         start: a.captionStart,
         duration: a.captionDur,
-        style: {
-          content: a.caption,
-          fontFamily: a.font,
-          fontSize: a.captionSize,
-          fontWeight: 600,
-          color: a.color,
-          align: 'center',
-        },
+        offsetY: a.captionOffset === 0.35 ? null : a.captionOffset,  // 0.35 是批量默认，单条不传保持原样
+        style,
       });
       result.title = t.data?.createdId;
       if (!a.json) log(`字幕「${a.caption}」· ${a.captionStart}–${a.captionStart + a.captionDur}s`);
@@ -289,7 +477,6 @@ async function main() {
       try { rmSync(projectDir, { recursive: true, force: true }); } catch { /* 占着就算了 */ }
       try { rmSync(join(workRoot, `${projectName}.mp4`), { force: true }); } catch { /* 同上 */ }
       try {
-        // 主目录空了就一起收掉，不留痕迹
         const { readdirSync, rmdirSync } = await import('node:fs');
         if (readdirSync(workRoot).length === 0) rmdirSync(workRoot);
       } catch { /* 非空就不动 */ }
@@ -303,7 +490,6 @@ async function main() {
 main().catch((e) => {
   const msg = String(e && e.message ? e.message : e);
   log('失败：' + msg);
-  // 把 Concat 的 stderr 尾巴带出来——写权限被拒、DLL 缺失这类问题只在这儿看得到
   if (/writesUnder|Permission|denied|not open/i.test(msg)) {
     log('提示：Concat headless 只允许写用户主目录，用 --work 指定别处，或让它留在默认位置。');
   }

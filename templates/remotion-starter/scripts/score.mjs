@@ -55,15 +55,21 @@ const midiToHz = (m) => 440 * Math.pow(2, (m - 69) / 12);
  */
 
 const INSTRUMENTS = {
-  // 有音高：正弦 + 慢起 + 长衰减
+  // 有音高：铺底。**不是纯正弦堆**——纯正弦听起来就是电流嗡鸣。
+  // 三处改动：① 每个音三路微失谐（±0.35%），产生自然的合唱厚度而不是单频拍
+  //          ② 加一点非谐波泛音（4.7 倍），让它有「气」而不是「嗡」
+  //          ③ 起音 0.35s 慢进，且**不衰减**（长音用 sustain 包络），避免切片重启造成周期性起伏
   pad(t, dur, hz, gain) {
-    const env = Math.min(1, t / 0.35) * Math.exp(-t / (dur * 0.9));
-    const vib = 1 + 0.0025 * Math.sin(TAU * 4.5 * t);
-    return gain * env * (
-      0.55 * Math.sin(TAU * hz * vib * t) +
-      0.25 * Math.sin(TAU * hz * 2 * t + 0.4) +
-      0.12 * Math.sin(TAU * hz * 3 * t + 1.1)
-    );
+    const attack = Math.min(1, t / 0.35);
+    const release = dur > 2 ? 1 : Math.max(0, Math.min(1, (dur - t) / 0.35));
+    const env = attack * release;
+    const d1 = 1 + 0.0035, d2 = 1 - 0.0031;
+    const v = 0.34 * Math.sin(TAU * hz * d1 * t)
+      + 0.30 * Math.sin(TAU * hz * d2 * t + 0.7)
+      + 0.16 * Math.sin(TAU * hz * 2 * t + 0.4)
+      + 0.08 * Math.sin(TAU * hz * 3 * t + 1.1)
+      + 0.05 * Math.sin(TAU * hz * 4.7 * t + 2.1);
+    return gain * env * v;
   },
 
   // 有音高：拨弦，快起快衰
@@ -216,12 +222,19 @@ function synth(cues) {
     const gain = b.gain ?? 0.18;
     const notes = (b.notes || []).length ? b.notes : [220];
     const dur = b.dur ?? duration;
-    // 长床切成 2 秒片，避免单个指数衰减包络把整段压没
-    const slice = Math.min(2, dur);
-    for (let s = 0; s < dur; s += slice * 0.85) {
-      const d = Math.min(slice, dur - s);
-      if (d <= 0.02) break;
-      for (const hz of notes) addNote((b.at ?? 0) + s, d, inst, hz, gain);
+    const isSustain = inst === 'pad' || inst.startsWith('ambience');
+    if (isSustain) {
+      // 持续音：一次铺满整段。切片会让包络每 1.7 秒重启一次，
+      // 听感上就是周期性的「一涌一涌」，和嗡鸣叠在一起特别难受。
+      for (const hz of notes) addNote(b.at ?? 0, dur, inst, hz, gain);
+    } else {
+      // 衰减型（pluck/bell 等）才切片，避免单个指数包络把整段压没
+      const slice = Math.min(2, dur);
+      for (let s = 0; s < dur; s += slice * 0.85) {
+        const d = Math.min(slice, dur - s);
+        if (d <= 0.02) break;
+        for (const hz of notes) addNote((b.at ?? 0) + s, d, inst, hz, gain);
+      }
     }
   }
 
@@ -255,6 +268,53 @@ function synth(cues) {
 }
 
 /* ---------------- 后处理 ---------------- */
+
+// 双二阶滤波器（RBJ cookbook）。为什么不用一阶：一阶的斜率只有 6dB/oct，
+// 要压掉 40Hz 那股「电流底噪」得把整个低频都砍掉；二阶 12dB/oct 能把
+// 80Hz 以下压下去而保住 150Hz 以上的和声根音。
+function biquad(buf, type, freq, sampleRate, Q = 0.707, gainDb = 0) {
+  const w0 = (2 * Math.PI * freq) / sampleRate;
+  const cos = Math.cos(w0), sin = Math.sin(w0);
+  const alpha = sin / (2 * Q);
+  const A = Math.pow(10, gainDb / 40);
+  let b0, b1, b2, a0, a1, a2;
+  if (type === 'highpass') {
+    b0 = (1 + cos) / 2; b1 = -(1 + cos); b2 = (1 + cos) / 2;
+    a0 = 1 + alpha; a1 = -2 * cos; a2 = 1 - alpha;
+  } else if (type === 'lowpass') {
+    b0 = (1 - cos) / 2; b1 = 1 - cos; b2 = (1 - cos) / 2;
+    a0 = 1 + alpha; a1 = -2 * cos; a2 = 1 - alpha;
+  } else if (type === 'peak') {
+    b0 = 1 + alpha * A; b1 = -2 * cos; b2 = 1 - alpha * A;
+    a0 = 1 + alpha / A; a1 = -2 * cos; a2 = 1 - alpha / A;
+  } else if (type === 'highshelf') {
+    const s = 2 * Math.sqrt(A) * alpha;
+    b0 = A * ((A + 1) + (A - 1) * cos + s);
+    b1 = -2 * A * ((A - 1) + (A + 1) * cos);
+    b2 = A * ((A + 1) + (A - 1) * cos - s);
+    a0 = (A + 1) - (A - 1) * cos + s;
+    a1 = 2 * ((A - 1) - (A + 1) * cos);
+    a2 = (A + 1) - (A - 1) * cos - s;
+  } else return;
+  const B0 = b0 / a0, B1 = b1 / a0, B2 = b2 / a0, A1 = a1 / a0, A2 = a2 / a0;
+  let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+  for (let i = 0; i < buf.length; i++) {
+    const x0 = buf[i];
+    const y0 = B0 * x0 + B1 * x1 + B2 * x2 - A1 * y1 - A2 * y2;
+    x2 = x1; x1 = x0; y2 = y1; y1 = y0;
+    buf[i] = y0;
+  }
+}
+
+// 母版链：先砍掉嗡鸣的地基，再补一点空气感。
+// 实测原始配乐 20–80Hz 占 37%、80–250Hz 占 59%、250Hz 以上只有 3.7%——
+// 能量几乎全堆在低频，人耳听到的就是「嗡」。这不是音色问题，是频谱失衡。
+function masterChain(buf, sampleRate) {
+  biquad(buf, 'highpass', 95, sampleRate, 0.8);   // 95Hz 以下基本清掉（嗡鸣主战场）
+  biquad(buf, 'peak', 160, sampleRate, 1.1, -2.5); // 160Hz 那点闷声压一下
+  biquad(buf, 'highshelf', 3200, sampleRate, 0.7, 2.0); // 3.2k 以上抬 2dB，补回清晰度
+  return buf;
+}
 
 function normalize(buf, targetPeak = 0.89) {
   let peak = 0;
@@ -361,6 +421,7 @@ if (!Number.isFinite(duration) || duration <= 0) {
 }
 
 const buf = synth(cues);
+masterChain(buf, SR);
 const norm = normalize(buf);
 
 if (cues.loop) foldTail(buf, 0.35, SR);
