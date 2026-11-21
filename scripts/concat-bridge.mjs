@@ -38,9 +38,9 @@
 //      注意它和 fontSize 一样是比例，所以 1080p 调好的值在 4K 依然对。
 
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, copyFileSync, rmSync, statSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, copyFileSync, rmSync, statSync, readFileSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, extname, join, resolve } from 'node:path';
+import { basename, dirname, extname, join, resolve } from 'node:path';
 
 // ---------- 参数 ----------
 
@@ -67,6 +67,8 @@ function parseArgs(argv) {
     captionWeight: null,
     font: 'Noto Sans SC',
     color: '#F4F1EA',
+    // 分轨：给了 --stems 就把配乐拆成一层一条轨（视频轨自动静音）
+    stems: null,
     concat: null,
     json: false,
     keep: true,
@@ -94,6 +96,7 @@ function parseArgs(argv) {
       case '--caption-weight': a.captionWeight = Number(v); i++; break;
       case '--font': a.font = v; i++; break;
       case '--color': a.color = v; i++; break;
+      case '--stems': a.stems = v; i++; break;
       case '--concat': a.concat = v; i++; break;
       case '--timeout': a.timeout = Number(v); i++; break;
       case '--json': a.json = true; break;
@@ -195,6 +198,39 @@ function loadSubtitles(a) {
     return { cues: parseSubsFromSpec(p), source: p };
   }
   return null;
+}
+
+// ---------- 分轨工具 ----------
+
+/** 判断一个 WAV 是不是全静音。
+ *
+ *  为什么需要：score.mjs --stems 会导出九层，但本片可能没用环境床（ambience），
+ *  那一层就是一条全零的 WAV。铺进 Concat 会多出一条什么都不响的轨，
+ *  在 GUI 里看着像「这里本该有内容但丢了」。
+ *
+ *  读不了文件时返回 false（当作有声）——宁可多一条轨，也不要静默吞掉内容。
+ */
+function isSilentWav(file, threshold = 8) {
+  try {
+    const buf = readFileSync(file);
+    if (buf.length <= 44) return true;
+    let off = 12;
+    let dataStart = -1;
+    let dataLen = 0;
+    while (off + 8 <= buf.length) {
+      const id = buf.toString('ascii', off, off + 4);
+      const size = buf.readUInt32LE(off + 4);
+      if (id === 'data') { dataStart = off + 8; dataLen = Math.min(size, buf.length - dataStart); break; }
+      off += 8 + size + (size % 2);
+    }
+    if (dataStart < 0 || dataLen <= 0) return true;
+    for (let i = dataStart; i + 1 < dataStart + dataLen; i += 2) {
+      if (Math.abs(buf.readInt16LE(i)) > threshold) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ---------- 找 Concat ----------
@@ -329,6 +365,10 @@ async function main() {
     log('  --font <字体名>           默认 Noto Sans SC');
     log('  --color <#rrggbb>         默认 #F4F1EA');
     log('');
+    log('  分轨（给了就把配乐拆成一层一条轨，视频轨自动静音）');
+    log('  --stems <目录>            读目录里所有 .wav，一个文件一条轨');
+    log('                            配合 score.mjs --stems 产出的 public/stems');
+    log('');
     log('  其他');
     log('  --work <目录>             工程目录；默认在用户主目录下（headless 只许写那儿）');
     log('  --concat <path>           指定 concat.exe；默认自动找');
@@ -393,6 +433,65 @@ async function main() {
     });
     result.clip = add.data?.createdId;
 
+    // 3b) 分轨：给了 --stems 就把配乐拆成一层一条轨。
+    //
+    // 为什么视频轨必须静音：成片自带混好的音轨，不静音的话听到的是
+    // 「分轨 + 成片音轨」两遍配乐叠在一起，而且成片音轨会盖掉分轨，
+    // 逐轨静音试听就失去意义了。
+    let stemTracks = [];
+    if (a.stems) {
+      const stemDir = resolve(a.stems);
+      if (!existsSync(stemDir)) throw new Error(`--stems 目录不存在：${stemDir}`);
+      const files = readdirSync(stemDir)
+        .filter((f) => extname(f).toLowerCase() === '.wav')
+        .sort();
+      if (!files.length) throw new Error(`--stems 目录里没有 .wav：${stemDir}`);
+
+      // 静音视频轨。clip_update 的 patch.muted 是唯一正确做法——
+      // 不要试图删视频的音轨，那是 detachAudio，会多出一条真音轨。
+      await c.tool('clip_update', { path: projectDir, clipId: result.clip, patch: { muted: true } });
+      if (!a.json) log('视频轨已静音（只听分轨）');
+
+      // 分轨之和听起来比成品小几 dB：分轨是母版链（含限幅器）之前的信号。
+      // score.mjs 会把建议补偿量写进 stems.json，这里读出来设到每条分轨的
+      // clip.volume 上。为什么不直接放大 WAV：那会削顶，而 WAV 要留着做诊断。
+      let stemVol = 1;
+      const metaPath = join(stemDir, 'stems.json');
+      if (existsSync(metaPath)) {
+        try {
+          const meta = JSON.parse(readFileSync(metaPath, 'utf8'));
+          if (Number.isFinite(meta.suggestGain) && meta.suggestGain > 0) stemVol = meta.suggestGain;
+        } catch { /* 读坏了就当 1，不影响工程生成 */ }
+      }
+      if (stemVol !== 1 && !a.json) {
+        log(`  分轨音量补偿 ×${stemVol.toFixed(2)}（${(20 * Math.log10(stemVol)).toFixed(1)} dB，来自 stems.json）`);
+      }
+
+      for (const f of files) {
+        const name = basename(f, extname(f));
+        // 全静音的层跳过：铺上去就是一条什么都不响的轨，在 GUI 里像「丢了内容」
+        if (isSilentWav(join(stemDir, f))) {
+          if (!a.json) log(`  跳过静音层 ${name}`);
+          continue;
+        }
+        const t = await c.tool('track_add', { path: projectDir });
+        // createdId 是小写 t42；timeline.tracks[] 里是 T1。两个不能混用。
+        const trackId = t.data?.createdId ?? t.data?.timeline?.tracks?.at(-1)?.id;
+        const im = await c.tool('media_import', { path: projectDir, file: join(stemDir, f) });
+        // media_import 的 structuredContent 同时带 createdId 和整个 media 列表，
+        // 遍历整个对象找 id 会撞到第一个旧条目（踩过：九条轨全放了 film.mp4）。
+        const sid = im.data?.createdId ?? im.data?.media?.id;
+        const ca = await c.tool('clip_add', { path: projectDir, mediaId: sid, trackId, start: 0 });
+        if (stemVol !== 1) {
+          const cid = ca.data?.createdId;
+          if (cid) await c.tool('clip_update', { path: projectDir, clipId: cid, patch: { volume: stemVol } });
+        }
+        stemTracks.push({ name, trackId });
+        if (!a.json) log(`  ${name.padEnd(11)} → ${trackId}`);
+      }
+      result.stems = stemTracks;
+    }
+
     // 4a) 批量字幕：一次落一条轨，一个 undo 步
     if (cues) {
       const style = {
@@ -445,9 +544,28 @@ async function main() {
       if (!a.json) log(`字幕「${a.caption}」· ${a.captionStart}–${a.captionStart + a.captionDur}s`);
     }
 
-    // 5) 保存
-    await c.tool('project_save', { path: projectDir });
+    // 4c) 删空轨。新建工程自带 4 条空轨（T1–T4），只用了 T1 和后面新建的，
+    //     剩下的空轨在 GUI 里就是几条「什么都没有的横条」，看着像内容丢了。
+    //
+    //     必须放在所有 clip 铺完之后：先删会让后面的 track_add 复用编号，
+    //     而 Concat 的轨道 id 删除后不重排。
+    {
+      const tl = await c.tool('timeline_read', { path: projectDir });
+      const tracks = tl.data?.timeline?.tracks || [];
+      const clips = tl.data?.timeline?.clips || [];
+      const used = new Set(clips.map((cl) => cl.track ?? cl.trackId));
+      const empties = tracks.filter((t) => !used.has(t.id));
+      for (const t of empties) {
+        await c.tool('edit_apply', { path: projectDir, command: { op: 'removeTrack', trackId: t.id } });
+      }
+      if (empties.length && !a.json) log(`删掉 ${empties.length} 条空轨（${empties.map((t) => t.id).join(', ')}）`);
+    }
 
+    // 5) 保存
+    //
+    // project_save 必须放在所有编辑之后。踩过：它写在删空轨之前，
+    // 删轨只活在内存里，重开工程 T2/T3/T4 又回来了。Concat 的编辑默认不落盘。
+    await c.tool('project_save', { path: projectDir });
     // 6) 导出。临时落在工程旁，成功后拷到 --out，避免跨盘写入被拒。
     const staged = join(workRoot, `${projectName}.mp4`);
     const ex = await c.tool('export_start', { path: projectDir, output: staged });

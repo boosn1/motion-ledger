@@ -233,7 +233,7 @@ node scripts/score.mjs --cues scripts/cues.json --out public/score.wav --stems
 **This table is the conclusion**: 81% of the energy sits in the four low layers, while `pad` holds 14.5% and `hat` only 0.1% — so the buzz can only come from those four. To audition track by track, lay the stems into Concat (one layer per track):
 
 ```bash
-node scripts/concat-stems.mjs --film out/film.mp4 --stems public/stems --name my-film-stems
+node scripts/concat-bridge.mjs --film out/film.mp4 --stems public/stems --subs-from-spec src/spec.ts --out final.mp4
 ```
 
 Mute one track at a time; whichever one kills the buzz is your culprit. The five real causes and their thresholds are in [`references/06-sound.md`](references/06-sound.md).
@@ -283,7 +283,7 @@ motion-ledger/
 │   └── 09-capabilities.md          what it can and cannot make, with cost estimates
 ├── scripts/
 │   ├── concat-bridge.mjs           film → Concat editor (captions, export)
-│   ├── concat-stems.mjs            stems → Concat stems project (one layer per track)
+│   ├── concat-stems.mjs            stems-only script (superseded by concat-bridge.mjs --stems)
 │   └── publish.mjs                 gates → commit → push in one command
 ├── verify/                         ← gates (zero dependencies)
 │   ├── film.mjs                    MP4 physical check

@@ -231,7 +231,7 @@ node scripts/score.mjs --cues scripts/cues.json --out public/score.wav --stems
 **这张表就是结论**：81% 能量压在低频四层，`pad` 只有 14.5%、`hat` 只有 0.1%——「嗡嗡」只可能来自那四层。要逐轨试听就铺进 Concat（一层一条轨）：
 
 ```bash
-node scripts/concat-stems.mjs --film out/film.mp4 --stems public/stems --name my-film-stems
+node scripts/concat-bridge.mjs --film out/film.mp4 --stems public/stems --subs-from-spec src/spec.ts --out final.mp4
 ```
 
 哪一层一关嗡嗡就没了，问题就定位到那一层。五种真凶与判断口径见 [`references/06-sound.md`](references/06-sound.md)。
@@ -281,7 +281,7 @@ motion-ledger/
 │   └── 09-capabilities.md          能做什么、不能做什么、成本估计
 ├── scripts/
 │   ├── concat-bridge.mjs           成片 → Concat 剪辑器（加字幕、导出）
-│   ├── concat-stems.mjs            分轨 → Concat 分轨工程（一层一条轨，逐轨静音试听）
+│   ├── concat-stems.mjs            只铺分轨的旧脚本（功能已并入 concat-bridge.mjs --stems）
 │   └── publish.mjs                 门禁 → 提交 → 推送（一条命令）
 ├── verify/                         ← 门禁（零依赖）
 │   ├── film.mjs                    MP4 体检

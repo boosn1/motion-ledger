@@ -665,18 +665,37 @@ writeFileSync(outPath, encodeWav(buf, SR));
 //   - 但各分轨之间的相对比例是真的，这正是判断「哪一层在嗡」需要的
 // 想让分轨之和等于成品，就得把母版链对每条分轨各跑一遍——那会把
 // 「这一层本身有没有问题」和「母版链怎么处理它」混在一起，失去诊断价值。
+//
+// 但是：九层原样相加会远超 1.0。实测直接相加 max_volume 打到 0.0 dBFS（削顶），
+// 交付件听起来就是破的。所以在导出前给**所有分轨乘同一个系数**，让它们之和
+// 的峰值回到 0.85 —— 同一个系数意味着相对比例一点没变，诊断价值不受影响，
+// 但「九轨一起播」时才不会炸。
 let stemInfo = [];
 if (wantStems) {
   mkdirSync(stemsDir, { recursive: true });
-  const mk = makeRand(0x5EED);
+
+  // 先算九层之和的峰值，再定一个统一的缩放系数
+  let sumPeak = 0;
+  const n = out.buses[BUS_ORDER[0]].length;
+  for (let i = 0; i < n; i++) {
+    let s = 0;
+    for (const b of BUS_ORDER) s += out.buses[b][i];
+    const a = Math.abs(s);
+    if (a > sumPeak) sumPeak = a;
+  }
+  const STEM_TARGET = 0.85;
+  const stemGain = sumPeak > STEM_TARGET ? STEM_TARGET / sumPeak : 1;
+
   for (const name of BUS_ORDER) {
     const bus = out.buses[name];
     let peak = 0;
     let sum = 0;
     for (let i = 0; i < bus.length; i++) {
-      const a = Math.abs(bus[i]);
+      const v = bus[i] * stemGain;
+      bus[i] = v;
+      const a = Math.abs(v);
       if (a > peak) peak = a;
-      sum += bus[i] * bus[i];
+      sum += v * v;
     }
     const rms = Math.sqrt(sum / Math.max(1, bus.length));
     const silent = peak < 1e-6;
@@ -692,6 +711,37 @@ if (wantStems) {
       silent,
     });
   }
+  stemInfo.gain = stemGain;
+  stemInfo.sumPeak = sumPeak;
+
+  // 分轨之和听起来要比成品小 3dB 左右：母版链里的限幅器把 RMS 提上去了，
+  // 而分轨是限幅之前的信号。为了让「九轨一起播」和交付件一样响，
+  // 算一个建议补偿量写进 stems.json —— 由 concat-bridge 读出来设到 clip 的
+  // volume 上。为什么不直接把 WAV 放大：那会削顶，而 WAV 要留着做诊断，
+  // 削顶的分轨听不出「这一层本来有没有问题」。
+  let sumSq = 0;
+  for (let i = 0; i < n; i++) {
+    let s = 0;
+    for (const b of BUS_ORDER) s += out.buses[b][i];
+    sumSq += s * s;
+  }
+  const sumRms = Math.sqrt(sumSq / Math.max(1, n));
+  let bufSq = 0;
+  for (let i = 0; i < buf.length; i++) bufSq += buf[i] * buf[i];
+  const masterRms = Math.sqrt(bufSq / Math.max(1, buf.length));
+  const suggestGain = sumRms > 0 ? masterRms / sumRms : 1;
+  const stemMeta = {
+    gain: stemGain,
+    sumPeak,
+    sumRmsDb: sumRms > 0 ? 20 * Math.log10(sumRms) : null,
+    masterRmsDb: masterRms > 0 ? 20 * Math.log10(masterRms) : null,
+    suggestGain,
+    layers: stemInfo.map((s) => ({ name: s.name, rmsDb: s.silent ? null : s.rmsDb, silent: s.silent })),
+  };
+  writeFileSync(`${stemsDir}/stems.json`, JSON.stringify(stemMeta, null, 2));
+  stemInfo.suggestGain = suggestGain;
+  stemInfo.masterRmsDb = stemMeta.masterRmsDb;
+  stemInfo.sumRmsDb = stemMeta.sumRmsDb;
 }
 
 /* ---------------- 报告 ---------------- */
@@ -714,6 +764,13 @@ console.log('');
 
 if (wantStems) {
   console.log(`  分轨已导出到 ${stemsDir}/（母版链之前，用于判断哪一层有问题）`);
+  if (stemInfo.gain < 1) {
+    console.log(`    九层之和峰值 ${stemInfo.sumPeak.toFixed(3)} 超了，全体统一 ×${stemInfo.gain.toFixed(3)}（相对比例不变）`);
+  }
+  if (stemInfo.suggestGain && Math.abs(stemInfo.suggestGain - 1) > 0.02) {
+    console.log(`    九轨一起播是 ${stemInfo.sumRmsDb.toFixed(1)} dB，成品是 ${stemInfo.masterRmsDb.toFixed(1)} dB`);
+    console.log(`    → concat-bridge 会自动给分轨设 volume=${stemInfo.suggestGain.toFixed(2)} 补上这 ${(20 * Math.log10(stemInfo.suggestGain)).toFixed(1)} dB`);
+  }
   console.log('');
   console.log('    层          峰值dBFS   RMS dBFS   占比');
   console.log('    ----------  --------   --------   ------');

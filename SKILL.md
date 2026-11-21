@@ -321,9 +321,11 @@ const BURN_SUBS = false;   // 默认交给 Concat
 文案的唯一真相源仍是 `spec.ts` 的 `SUBS`，桥接脚本用 `--subs-from-spec` 直接读，不另存一份：
 
 ```bash
-node scripts/concat-stems.mjs --film out/film.mp4 --stems public/stems \
-  --subs-from-spec src/spec.ts --name my-film
+node scripts/concat-bridge.mjs --film out/film.mp4 --out final.mp4 \
+  --stems public/stems --subs-from-spec src/spec.ts
 ```
+
+**一条命令出齐三样**：视轨（自动静音）、每条分轨一条音轨、一条字幕轨。别分两步做——早先分轨是 `concat-stems.mjs` 单独跑的，结果只跑桥接脚本时工程里没音轨，看起来像「音轨丢了」。
 
 **什么时候开回 `true`**：字幕要跟着画面动（逐字出现、跟随元素位移），或者交付环境无法二次导出。
 
@@ -340,7 +342,8 @@ node scripts/score.mjs --cues scripts/cues.json --out public/score.wav --stems
 要逐轨试听就铺进 Concat（一层一条轨，可逐轨静音）：
 
 ```bash
-node scripts/concat-stems.mjs --film out/film.mp4 --stems public/stems --name my-film-stems
+node scripts/concat-bridge.mjs --film out/film.mp4 --stems public/stems \
+  --subs-from-spec src/spec.ts --out final.mp4
 ```
 
 哪一层一关嗡嗡就没了，问题就定位到那一层。判断口径与五种真凶见 `references/06-sound.md`。

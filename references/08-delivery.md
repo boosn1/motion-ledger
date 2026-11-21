@@ -154,14 +154,14 @@ C:\Users\boosn\concat-motion-probe\probe is not open - open it first (code: notO
 const BURN_SUBS = false;
 ```
 
-关掉之后 `film.mp4` 里没有字，字幕由 `concat-bridge.mjs` / `concat-stems.mjs` 的 `captions_add` 落成 Concat 的字幕轨，在 GUI 里直接改。
+关掉之后 `film.mp4` 里没有字，字幕由 `concat-bridge.mjs` 的 `captions_add` 落成 Concat 的字幕轨，在 GUI 里直接改。
 
 **文案的唯一真相源仍是 `spec.ts` 的 `SUBS`**——桥接脚本用 `--subs-from-spec` 直接读它，不另存一份：
 
 ```bash
-node scripts/concat-stems.mjs \
+node scripts/concat-bridge.mjs \
   --film out/film.mp4 --stems public/stems \
-  --subs-from-spec src/spec.ts --name my-film
+  --subs-from-spec src/spec.ts --out final.mp4
 ```
 
 两种模式的取舍：
@@ -202,14 +202,30 @@ node scripts/score.mjs --cues scripts/cues.json --out public/score.wav --stems
 再把分轨铺成 Concat 工程，一层一条轨：
 
 ```bash
-node scripts/concat-stems.mjs \
+node scripts/concat-bridge.mjs \
   --film out/film.mp4 \
   --stems public/stems \
   --subs-from-spec src/spec.ts \
-  --name my-film-stems
+  --out final.mp4
 ```
 
+**一条命令出齐三样东西**：视轨（已静音）、每条分轨一条音轨、一条字幕轨。不用分两步——早先分轨是 `concat-stems.mjs` 单独做的，现在并入 `concat-bridge.mjs` 了，因为「视频 + 分轨 + 字幕」本来就是同一个工程该有的事，分两个脚本反而容易只做一半（踩过：只跑 `concat-bridge.mjs` 导出字幕版，工程里没有音轨，看起来像「音轨丢了」）。
+
 打开工程后**逐轨静音**，哪一层一关嗡嗡就没了，问题就定位到那一层。这比反复渲片试听快得多。
+
+### 分轨的音量：为什么工程里是 ×1.20 而不是原值
+
+分轨是母版链**之前**的信号。九层原样相加峰值能到 1.73（远超 0.85），直接叠会削顶；统一压到 0.49 之后又比成品小 2 dB（限幅器把成品 RMS 提上去了）。
+
+所以 `score.mjs --stems` 会在分轨目录里顺手写一份 `stems.json`：
+
+```json
+{ "gain": 0.491, "sumPeak": 1.730, "sumRmsDb": -20.4, "masterRmsDb": -18.8, "suggestGain": 1.197 }
+```
+
+`concat-bridge.mjs` 读它，把 `suggestGain` 设到每条分轨 clip 的 `volume` 上。**WAV 本身不动**——那会削顶，而 WAV 要留着做诊断（削顶的分轨听不出「这一层本来有没有问题」）。
+
+实测：不补偿 -23.4 dB，补偿后 -21.8 dB（母版 -20.3 dB，差的 1.5 dB 是 Concat 二次编码 + AAC）。
 
 ### 归并规则：按「耳朵能分辨的层」，不按音色
 
@@ -233,7 +249,7 @@ node scripts/concat-stems.mjs \
 
 **分轨之和 ≠ `score.wav`。** 分轨导的是**母版链之前**的总线信号，`score.wav` 过了一遍压缩、EQ、限幅。所以分轨能用来判断「哪一层在响」，不能用来拼回原样。
 
-**静音层会被跳过。** `score.mjs` 会给没用到的层也导一个空 WAV（比如本片没有环境床，`ambience.wav` 全是 0）。`concat-stems.mjs` 读 WAV 头扫 data 区，全静音的层不铺轨——多一条无声轨会让人误以为「这层有问题」。
+**静音层会被跳过。** `score.mjs` 会给没用到的层也导一个空 WAV（比如本片没有环境床，`ambience.wav` 全是 0）。桥接脚本读 WAV 头扫 data 区，全静音的层不铺轨——多一条无声轨会让人误以为「这层有问题」。
 
 ### 视频轨要静音，空轨要删掉
 
@@ -264,7 +280,7 @@ Concat 的 `media_import` 返回的 `structuredContent` 里**同时**有 `create
 
 第一版脚本遍历整个对象找 `m\d+`，第一条永远是已经导入过的 `film.mp4`（`m1`）。结果九条音轨上放的全是视频，而脚本一路打印「成功」——分轨文件确实导进去了，但一条都没用上。
 
-**这种静默错位只能靠回读时间线抓出来。** 所以 `concat-stems.mjs` 铺完轨后会重新 `timeline_read`，按 `cl.media` → `mediaName` 逐条核对每条音轨上是否正好是它自己的那一层，不符直接 `throw`：
+**这种静默错位只能靠回读时间线抓出来。** 所以桥接脚本铺完轨后会重新 `timeline_read`，按 `cl.media` → `mediaName` 逐条核对每条音轨上是否正好是它自己的那一层，不符直接 `throw`：
 
 ```
 分轨没有正确落位：

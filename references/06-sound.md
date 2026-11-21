@@ -434,7 +434,7 @@ node scripts/score.mjs --cues scripts/cues.json --out public/score.wav --stems
 要看逐轨试听，把分轨铺进 Concat（一层一条轨，可逐轨静音）：
 
 ```bash
-node scripts/concat-stems.mjs --film out/film.mp4 --stems public/stems --name my-film-stems
+node scripts/concat-bridge.mjs --film out/film.mp4 --stems public/stems `n  --subs-from-spec src/spec.ts --out final.mp4
 ```
 
 细节见 `08-delivery.md` 的「分轨工程」一节。
