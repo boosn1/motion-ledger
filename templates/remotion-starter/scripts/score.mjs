@@ -118,11 +118,55 @@ const INSTRUMENTS = {
     return gain * env * (0.6 * n + 0.4 * Math.sin(TAU * 2200 * t));
   },
 
-  // 节奏：底鼓，低频扫频
+  // 节奏：底鼓。**三层，缺一层就不像鼓**。
+  //
+  // 参考曲（vibe_knowledge_bgm.wav）的 80–160Hz 是强脉冲：CV 0.92、峰均比 4.39，
+  // 低频最强峰在 44Hz / 32Hz。说明那是「打出来的鼓」，不是铺着的低音。
+  // 上一版是单正弦扫频 55→165Hz，只有 body 没有 click，也没有次低音，
+  // 打出来像「噗」不像「咚」，而且能量全落在 100Hz 以上（正是我们中低频过载的来源之一）。
+  //
+  // 三层分工：
+  //   ① body：扫频 42→172Hz 快速落到底，负责「咚」的音高感
+  //   ② thump：body 的一半频率，负责 20–60Hz 的胸口感（参考曲 71% 能量在这里）
+  //   ③ click：2.6kHz 极短瞬态，负责「打」这个动作本身，没有它鼓就是糊的
   kick(t, dur, hz, gain) {
-    const env = Math.exp(-t / 0.11);
-    const f = 55 + 110 * Math.exp(-t / 0.03);
-    return gain * env * Math.sin(TAU * f * t);
+    const env = Math.exp(-t / 0.15);
+    const f = 42 + 130 * Math.exp(-t / 0.028);
+    const body = Math.sin(TAU * f * t);
+    const thump = 0.55 * Math.sin(TAU * f * 0.5 * t);
+    // click 层起音 8ms 而不是 5ms：5ms 太尖，峰值贡献大而听感提升小
+    const click = Math.exp(-t / 0.008) * 0.22 * Math.sin(TAU * 2600 * t);
+    return gain * (env * (body + thump) + click);
+  },
+
+  // 有音高：超低频（30–60Hz）。参考曲 30–80Hz 占 26.5%，**而且是脉冲（CV 0.65）**。
+  //
+  // 这条测量纠正了一个我之前的误解：低频不等于电流声。参考曲低频很重却不嗡，
+  // 因为它是「一下一下打出来的」；我们之前那版嗡，是因为低频被长音铺满（drone）。
+  // 所以 sub 只能进 patterns（按拍打），绝不能进 bed（长音铺满整段）。
+  //
+  // 纯正弦在这么低的频率上是一根频谱针，用软饱和（tanh）长出二三次谐波，
+  // 耳朵才认得出「这是个有音高的低频」而不是「电流」。
+  //
+  // 起音 0.012s 而不是 0.004s：4ms 起音等于瞬间跳变，峰值很高（crest 19.3dB，
+  // 参考曲只有 15.5dB），归一化被迫压到 ×0.58，整片平均音量反而变小。
+  // 12ms 起音让峰值降下来，同样响度下能量能放得更满。
+  sub(t, dur, hz, gain) {
+    const attack = Math.min(1, t / 0.012);
+    const env = Math.exp(-t / 0.24) * attack;
+    const v = Math.tanh(2.2 * Math.sin(TAU * hz * t)) / Math.tanh(2.2);
+    return gain * env * v;
+  },
+
+  // 有音高：短促低音打点（80–160Hz）。参考曲这一段是强脉冲（CV 0.92），
+  // 但基频在 44Hz——所以 80–160 里既有底鼓的二次谐波，也有贝斯的打点。
+  // 用 bass 的长音去做这一段会让 CV 掉到 0.4 以下，听感变成「糊成一片」。
+  bassPluck(t, dur, hz, gain) {
+    const env = Math.exp(-t / 0.16) * Math.min(1, t / 0.005);
+    const v = 0.70 * Math.sin(TAU * hz * t)
+      + 0.22 * Math.sin(TAU * hz * 2 * t + 0.3)
+      + 0.08 * Math.sin(TAU * hz * 3 * t + 0.9);
+    return gain * env * v;
   },
 
   // 节奏：拍手，噪声爆发
@@ -343,13 +387,67 @@ function biquad(buf, type, freq, sampleRate, Q = 0.707, gainDb = 0) {
   }
 }
 
-// 母版链：先砍掉嗡鸣的地基，再补一点空气感。
-// 实测原始配乐 20–80Hz 占 37%、80–250Hz 占 59%、250Hz 以上只有 3.7%——
-// 能量几乎全堆在低频，人耳听到的就是「嗡」。这不是音色问题，是频谱失衡。
+// 母版链：把频谱重心压回低频，同时保住清晰度。
+//
+// 这一段被改过两次，两次都是被实测推翻的，记在这里免得再走回头路：
+//
+// 【第一次】原始配乐 20–80Hz 占 37%、80–250Hz 占 59%、250Hz 以上只有 3.7%，
+// 听起来是电流嗡鸣。当时的修法是 highpass 95Hz 一刀切掉。嗡鸣确实没了，
+// 但**把厚度也一起砍没了**——用户下一轮反馈「还是不行」。
+//
+// 【第二次】拿参考曲 vibe_knowledge_bgm.wav 做同一套测量，结果是：
+//   参考曲  20–40Hz 26.5% / 40–80Hz 44.9% / 80–160Hz 15.7% / 160–320Hz 5.6% / 320Hz 以上 7.1%
+//   我们    30–80Hz 0.0%  / 80–160Hz 9.7%  / 160–400Hz 29.2% / 400–1200Hz 41.4%
+// 也就是说：参考曲 71% 的能量在 80Hz 以下，我们只有 1.5%；
+// 而我们堆得最满的 160–1200Hz 恰好是参考曲最少的两个频段。
+// **这个频段堆满 = 听起来薄、亮、廉价。**
+//
+// 更关键的一点：参考曲的低频是**脉冲式**（80–160Hz 的 CV 0.92、峰均比 4.39），
+// 不是常驻 drone（我们的 CV 只有 0.22）。所以「低频多」本身不导致嗡，
+// **低频被长音铺满才导致嗡**。这解释了为什么第一次修反了：
+// 问题不在低频太多，在于低频全是持续音、没有打点。
+//
+// 现在这条链：不砍低频，改成「压中低 + 提一点高频」。
 function masterChain(buf, sampleRate) {
-  biquad(buf, 'highpass', 95, sampleRate, 0.8);   // 95Hz 以下基本清掉（嗡鸣主战场）
-  biquad(buf, 'peak', 160, sampleRate, 1.1, -2.5); // 160Hz 那点闷声压一下
-  biquad(buf, 'highshelf', 3200, sampleRate, 0.7, 2.0); // 3.2k 以上抬 2dB，补回清晰度
+  // 30Hz 以下只有隆隆声没有音高，切掉不损失任何东西（参考曲最低峰在 32Hz）
+  biquad(buf, 'highpass', 30, sampleRate, 0.7);
+  // 160–400Hz 是我们堆得最满的频段（29.2%，参考曲只有 5.6%），压 3.5dB
+  biquad(buf, 'peak', 260, sampleRate, 1.0, -3.5);
+  // 400–1200Hz 我们占 41.4%（参考曲 5.4%），再压一点，把中频让出来
+  biquad(buf, 'peak', 750, sampleRate, 1.2, -2.0);
+  // 2kHz 以上抬 2.5dB，补回被压掉之后的清晰度（参考曲 high 频段 CV 1.25，很活跃）
+  biquad(buf, 'highshelf', 2400, sampleRate, 0.7, 2.5);
+  // 最后一级软限幅，把 crest 从 19.1dB 压到参考曲的 15.5dB 附近
+  limiter(buf, sampleRate);
+  return buf;
+}
+
+// 软限幅（feed-forward 峰值压缩）。
+//
+// 为什么需要它：加完 sub 打点层之后实测 crest（峰均比）= 19.1dB，
+// 参考曲只有 15.5dB。crest 高意味着峰值被少数几个低频打点占满，
+// 归一化只能压到 ×0.58，整片平均音量反而变小（-20.1 dBFS，参考曲 -19.2）。
+// 听感上就是「低频一下一下很冲，但整体不够满」。
+//
+// 参考曲 peak 只有 -3.7 dBFS 却比我们响，说明它是靠压缩提 RMS，不是靠推增益。
+// 这里用 2:1 软拐点，阈值 -16dBFS：低于阈值完全不动（保住打点的瞬态），
+// 高于阈值每 2dB 只留 1dB，峰值被收住，归一化就能把整体推上去。
+function limiter(buf, sampleRate) {
+  const thr = 0.158;          // -16 dBFS
+  const ratio = 2;
+  const attack = Math.exp(-1 / (0.004 * sampleRate));   // 4ms
+  const release = Math.exp(-1 / (0.120 * sampleRate));  // 120ms
+  let env = 0;
+  for (let i = 0; i < buf.length; i++) {
+    const a = Math.abs(buf[i]);
+    // 峰值检测：attack 快跟、release 慢放
+    env = a > env ? attack * env + (1 - attack) * a : release * env + (1 - release) * a;
+    if (env <= thr) continue;
+    // 软拐点：超出的部分按 ratio 压缩
+    const over = env - thr;
+    const target = thr + over / ratio;
+    buf[i] *= target / env;
+  }
   return buf;
 }
 

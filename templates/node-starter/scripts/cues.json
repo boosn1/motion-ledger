@@ -2,21 +2,28 @@
   "duration": 4,
   "bpm": 90,
   "loop": false,
-  "palette": ["pad", "bass", "pluck", "tick", "bell"],
+  "palette": ["pad", "bass", "pluck", "tick", "bell", "kick", "hat", "sub", "bassPluck"],
   "_why_chords": "4 秒片拆成两个 2 秒和弦（Am → F），走一步也算有和声进行。不加 chords 的话整片只有一组音，听感是持续低音而不是音乐。详见 references/06-sound.md 的「缺一个 BGM」一节。",
-  "_why_octave": "每个和弦再叠一层高八度（gain 0.13）。pad 的基频在 low 频段，只加基频会让 mid 更空；高八度把能量推进 250–2k，才通得过「mid ≥ 20%」的失衡判据。",
+  "_why_octave": "每个和弦再叠一层高八度（gain 0.040）。pad 的基频在 low 频段，只加基频会让 mid 更空；高八度把能量推进 250–2k。但高八度层压在 640–1280Hz，参考曲这一段只有 1.4%，所以 gain 必须很小——早期写 0.13 会让中频过载。",
+  "_why_lowend": "参考曲实测：20–40Hz 26.5% / 40–80Hz 44.9%（合计 71.4%），且 30–80Hz 的包络 CV 0.65、80–160Hz 的 CV 0.92——低频是「打出来的」，不是铺着的。所以 sub 与 bassPluck 只进 patterns（按拍打），绝不进 bed（长音铺满整段会变 drone，那才是「嗡嗡像电流」）。详见 references/06-sound.md 的「拿参考曲当标尺」一节。",
   "chords": [
-    { "at": 0, "dur": 2, "inst": "pad", "notes": [220, 261.63, 329.63], "gain": 0.175 },
-    { "at": 2, "dur": 2, "inst": "pad", "notes": [174.61, 220, 261.63], "gain": 0.175 },
-    { "at": 0, "dur": 2, "inst": "pad", "notes": [440, 523.25, 659.25], "gain": 0.13 },
-    { "at": 2, "dur": 2, "inst": "pad", "notes": [349.23, 440, 523.25], "gain": 0.13 }
+    { "at": 0, "dur": 2, "inst": "pad", "notes": [220, 261.63, 329.63], "gain": 0.095 },
+    { "at": 2, "dur": 2, "inst": "pad", "notes": [174.61, 220, 261.63], "gain": 0.095 },
+    { "at": 0, "dur": 2, "inst": "pad", "notes": [440, 523.25, 659.25], "gain": 0.040 },
+    { "at": 2, "dur": 2, "inst": "pad", "notes": [349.23, 440, 523.25], "gain": 0.040 }
   ],
   "bed": [
-    { "at": 0, "dur": 2, "inst": "bass", "notes": [110], "gain": 0.14 },
-    { "at": 2, "dur": 2, "inst": "bass", "notes": [87.31], "gain": 0.14 }
+    { "at": 0, "dur": 2, "inst": "bass", "notes": [110], "gain": 0.062 },
+    { "at": 2, "dur": 2, "inst": "bass", "notes": [87.31], "gain": 0.062 }
   ],
   "patterns": [
-    { "inst": "pluck", "every": 0.667, "notes": [293.66, 349.23, 440], "from": 0.667, "to": 3.0, "gain": 0.18 }
+    { "inst": "sub", "every": 0.667, "notes": [55], "from": 0, "to": 2, "gain": 0.34 },
+    { "inst": "sub", "every": 0.667, "notes": [43.65], "from": 2, "to": 4, "gain": 0.34 },
+    { "inst": "bassPluck", "every": 0.667, "notes": [110], "from": 0, "to": 2, "gain": 0.52 },
+    { "inst": "bassPluck", "every": 0.667, "notes": [87.31], "from": 2, "to": 4, "gain": 0.52 },
+    { "inst": "kick", "every": 1.333, "from": 0, "to": 4, "gain": 0.34 },
+    { "inst": "hat", "every": 0.667, "from": 0, "to": 4, "gain": 0.050 },
+    { "inst": "pluck", "every": 0.667, "notes": [293.66, 349.23, 440], "from": 0.667, "to": 3.0, "gain": 0.062 }
   ],
   "events": [
     { "at": 0.6, "inst": "tick", "gain": 0.28 },
