@@ -505,4 +505,4 @@
 - **触发场景**：在项目里改进了 `score.mjs`，没回写模板。
 - **当时的错误判断**：`verify/sync.mjs` 通过 = 全部一致。
 - **正确做法**：`sync.mjs` 只比 `templates/remotion-starter/scripts/score.mjs` 与 `templates/node-starter/scripts/score.mjs`；项目内的第三份不在它的视野里。项目侧的改进要单独决定是否回写模板（回写会让所有新项目继承，但也可能带进未验证的参数）。
-- **可复用结论**：**「同步脚本通过」只覆盖它检查的那两份。** 项目派生出的第四份、第五份，要有人负责判断回流。
+- **可复用结论**：**「同步脚本通过」只覆盖它检查的那两份。** 项目派生出的第四份、第五份，要有人负责判断回流。**另一面：`sync.mjs` 不能在项目目录里跑**——它按 `templates/remotion-starter/scripts/score.mjs` 的相对路径找文件，项目里没有 `templates/`，会以退出码 2 报「找不到文件」。把 sync 串进项目的 `npm run gates` 是错的，它不是项目门禁。
