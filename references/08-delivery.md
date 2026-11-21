@@ -164,6 +164,16 @@ node scripts/concat-bridge.mjs \
   --subs-from-spec src/spec.ts --out final.mp4
 ```
 
+**字幕底色默认是透明的。** 桥接脚本的 `captionBg` 默认 `null`，只有显式传 `--caption-bg "#05070AB8"` 才会加底板。**要「透明」就删掉这个参数，不要传一个表示透明的色值**——传 `#00000000` 也能跑，但下次有人看到命令行会以为「这里需要一个底色」。
+
+```bash
+# 无底板（默认）——字直接压在画面上
+node scripts/concat-bridge.mjs --film out/film.mp4 --out final.mp4 --subs-from-spec src/spec.ts
+
+# 想要半透明黑底才加这个
+node scripts/concat-bridge.mjs ... --caption-bg "#05070AB8"
+```
+
 两种模式的取舍：
 
 | | 烧进画面（自己加 `<Subtitles />`） | 放 Concat（默认） |

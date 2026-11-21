@@ -156,8 +156,10 @@ Get-ChildItem templates/remotion-starter/node_modules/.remotion/chrome-headless-
 node scripts/concat-bridge.mjs --film out/film.mp4 --out final.mp4 `
   --subs-from-spec src/spec.ts `
   --caption-size 0.042 --caption-offset 0.35 `
-  --caption-bg "#05070AB8" --font "Noto Sans SC" --color "#F4F1EA"
+  --font "Noto Sans SC" --color "#F4F1EA"
 ```
+
+（想要半透明底板再加 `--caption-bg "#05070AB8"`。**不传就是透明的**——「透明」是默认值，不是一个要填的色值。）
 
 `--subs-from-spec` 直接读 `spec.ts` 的 `SUBS` 数组（单一真相源，不用另存一份 SRT）。也可以给现成字幕文件：`--subs my.srt`（支持 `.srt` / `.vtt` / `.json`）。
 **好处：改一个字不用重渲，在 Concat 里双击就改。** 60 秒片重渲一次约 4 分钟，改字幕等 4 分钟是浪费。
