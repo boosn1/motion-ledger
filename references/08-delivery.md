@@ -143,6 +143,38 @@ C:\Users\boosn\concat-motion-probe\probe is not open - open it first (code: notO
 
 ---
 
+## 字幕：默认不在画面里，在 Concat 里
+
+字幕是**唯一改一次就要重渲全片**的元素。画面里的其他东西（地球、光点、尺子）改了重渲是应该的——它们和运动曲线绑死，`film.mjs` 要重新量。字幕只是文字，改一个错别字重渲 60 秒（约 4 分钟）不划算。
+
+所以 `Film.tsx` 里有一条开关：
+
+```tsx
+// E07 字幕要不要烧进画面。默认 false —— 交给 Concat。
+const BURN_SUBS = false;
+```
+
+关掉之后 `film.mp4` 里没有字，字幕由 `concat-bridge.mjs` / `concat-stems.mjs` 的 `captions_add` 落成 Concat 的字幕轨，在 GUI 里直接改。
+
+**文案的唯一真相源仍是 `spec.ts` 的 `SUBS`**——桥接脚本用 `--subs-from-spec` 直接读它，不另存一份：
+
+```bash
+node scripts/concat-stems.mjs \
+  --film out/film.mp4 --stems public/stems \
+  --subs-from-spec src/spec.ts --name my-film
+```
+
+两种模式的取舍：
+
+| | 烧进画面（`BURN_SUBS = true`） | 放 Concat（默认） |
+|---|---|---|
+| 改一个字 | 重渲全片（约 4 分钟） | GUI 里双击改，几秒 |
+| 发到不认外挂字幕的平台 | 直接能发 | 导出时烧进去（`export` 会烘） |
+| 字体一致性 | 代码控制，跨机器一致 | 依赖本机字体 |
+| 字幕跟随画面动效（淡入、位移） | 可以（`<Subtitles>` 里写的入场） | 只能用 Concat 的样式 |
+
+**什么时候该开回 `true`**：字幕需要跟着画面动（比如逐字出现、跟随元素位移），或者交付环境无法二次导出。这时改文案的代价只能接受。
+
 ## 分轨工程：把配乐拆成一层一条轨
 
 交付时最常被问到的问题是「这个声音是哪来的」。成片只有一条混好的音轨，答不了。

@@ -308,6 +308,25 @@ node scripts/concat-bridge.mjs --film out/film.mp4 --out final.mp4 \
 
 没有 Concat 也能交付：`ffmpeg -vf subtitles=` 烧硬字幕、`-i voice.wav -shortest` 接配音、`-f concat` 拼接。只是没有「拖一下就好」的手感。
 
+### 字幕默认不烧进画面
+
+`Film.tsx` 里有一条开关：
+
+```tsx
+const BURN_SUBS = false;   // 默认交给 Concat
+```
+
+**为什么默认关**：字幕是唯一「改一个字就要重渲全片」的元素。画面里的其他东西改了重渲是应该的（它们和运动曲线绑死，`film.mjs` 要重新量），字幕只是文字，在剪辑器里改是几秒的事。
+
+文案的唯一真相源仍是 `spec.ts` 的 `SUBS`，桥接脚本用 `--subs-from-spec` 直接读，不另存一份：
+
+```bash
+node scripts/concat-stems.mjs --film out/film.mp4 --stems public/stems \
+  --subs-from-spec src/spec.ts --name my-film
+```
+
+**什么时候开回 `true`**：字幕要跟着画面动（逐字出现、跟随元素位移），或者交付环境无法二次导出。
+
 ### 配乐出问题时：先分轨，再判断
 
 用户说「嗡嗡」「有电流声」「没律动」「不像一首曲子」时，**不要凭听感调参数**——先看是哪一层在响：
