@@ -410,6 +410,8 @@ async function main() {
   const projectName = a.name ? String(a.name) : 'film-' + Date.now().toString(36);
   const projectDir = join(workRoot, projectName);
   if (!existsSync(workRoot)) mkdirSync(workRoot, { recursive: true });
+  // 记下「这个工程是不是这次新造的」——决定 --no-keep 能不能删它（见 finally）
+  const projectExisted = existsSync(projectDir);
 
   const exe = findConcat(a.concat);
   const c = new Concat(exe);
@@ -612,19 +614,30 @@ async function main() {
     if (!a.json) log(`交付 ${out} · ${result.bytes} bytes`);
     // 工程路径必须说出来：用户要在 Concat GUI 里打开它继续改。
     // 之前的默认行为是导出完就删，用户打开 Concat 只看到「项目不存在」。
-    if (!a.json) log(`工程保留在 ${projectDir}`);
+    // --no-keep 时工程马上就要被删（除非它运行前就存在），别谎报「保留在」。
+    if (!a.json) {
+      if (a.keep || projectExisted) log(`工程保留在 ${projectDir}`);
+      else log('工程已删除（--no-keep）');
+    }
   } finally {
     c.stop();
     // 清掉 concat.lock：Concat 在进程退出时不一定回收它，留下的锁会让 GUI
     // 打开工程时报「已被占用」。PID 已被系统回收给别的进程时更是死锁。
     try { rmSync(join(projectDir, 'concat.lock'), { force: true }); } catch { /* 没锁就算了 */ }
-    if (!a.keep) {
+    // 删工程是危险动作，加两道闸：
+    //
+    //   ① 只删「这次跑出来的」工程。重名工程（--name 撞上已有的）一律不动——
+    //      用户的草稿可能有他没提交的手工改动，删了就是不可恢复的数据丢失。
+    //   ② 绝不删 workRoot 本身。它装着所有工程，删空目录等于把「我的草稿在哪」
+    //      这个问题变成「我全没了」。
+    //
+    // 这两条是踩过的：曾经导出完就把整个 .motion-ledger-concat 清空，
+    // 用户打开 Concat 只看到「项目不存在」。
+    if (!a.keep && !projectExisted) {
       try { rmSync(projectDir, { recursive: true, force: true }); } catch { /* 占着就算了 */ }
       try { rmSync(join(workRoot, `${projectName}.mp4`), { force: true }); } catch { /* 同上 */ }
-      try {
-        const { readdirSync, rmdirSync } = await import('node:fs');
-        if (readdirSync(workRoot).length === 0) rmdirSync(workRoot);
-      } catch { /* 非空就不动 */ }
+    } else if (!a.keep && projectExisted) {
+      log(`注意：工程 ${projectName} 运行前就存在，--no-keep 不删它（避免删掉你的手工改动）`);
     }
     if (a.json) log(JSON.stringify(result, null, 2));
   }
