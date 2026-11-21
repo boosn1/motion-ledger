@@ -2,9 +2,21 @@
   "duration": 15,
   "bpm": 72,
   "loop": true,
-  "palette": ["pad", "pluck", "tick"],
+  "palette": ["pad", "pluck", "tick", "bell"],
+  "_why_chords": "15 秒循环片拆成三个 5 秒和弦（Am → F → G），第四个直接回到 Am，接缝处正好是调性回归。和声进行是「像一首曲子」和「像一台机器在响」的分界线——不加 chords，整片只有一组音，听感就是持续低音。详见 references/06-sound.md 的「缺一个 BGM」一节。",
+  "_why_octave": "每个和弦再叠一层高八度（gain 0.135）。pad 的基频在 low 频段，只加基频会让 mid 更空；高八度把能量推进 250–2k，才通得过「mid ≥ 20%」的失衡判据。",
+  "chords": [
+    { "at": 0,  "dur": 5, "inst": "pad", "notes": [220, 261.63, 329.63], "gain": 0.175 },
+    { "at": 5,  "dur": 5, "inst": "pad", "notes": [174.61, 220, 261.63], "gain": 0.175 },
+    { "at": 10, "dur": 5, "inst": "pad", "notes": [196, 246.94, 293.66], "gain": 0.175 },
+    { "at": 0,  "dur": 5, "inst": "pad", "notes": [440, 523.25, 659.25], "gain": 0.135 },
+    { "at": 5,  "dur": 5, "inst": "pad", "notes": [349.23, 440, 523.25], "gain": 0.135 },
+    { "at": 10, "dur": 5, "inst": "pad", "notes": [392, 493.88, 587.33], "gain": 0.135 }
+  ],
   "bed": [
-    { "at": 0, "dur": 15, "inst": "pad", "notes": [146.83, 174.61, 220], "gain": 0.16 }
+    { "at": 0, "dur": 5,  "inst": "bass", "notes": [110], "gain": 0.14 },
+    { "at": 5, "dur": 5,  "inst": "bass", "notes": [87.31], "gain": 0.14 },
+    { "at": 10, "dur": 5, "inst": "bass", "notes": [98], "gain": 0.14 }
   ],
   "patterns": [
     { "inst": "pluck", "every": 0.833, "notes": [293.66, 349.23, 440], "from": 3.33, "to": 9.4, "gain": 0.2 }

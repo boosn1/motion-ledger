@@ -61,7 +61,11 @@ const INSTRUMENTS = {
   //          ③ 起音 0.35s 慢进，且**不衰减**（长音用 sustain 包络），避免切片重启造成周期性起伏
   pad(t, dur, hz, gain) {
     const attack = Math.min(1, t / 0.35);
-    const release = dur > 2 ? 1 : Math.max(0, Math.min(1, (dur - t) / 0.35));
+    // 结尾一律留 0.35s 淡出。原来写的是 `dur > 2 ? 1 : 淡出`，理由是「长音被切片会周期性起伏」——
+    // 那个问题已经由 synth() 的 isSustain 分支解决（持续音不再切片）。现在和弦每 6 秒换一次，
+    // 必须让每个和弦自己淡出，否则切点上是硬切。相邻和弦靠 dur 多给 0.5s 交叠，淡出与下一个的
+    // 淡入重叠，接缝处才不会掉到零（掉到零就是一个「抽气」）。
+    const release = Math.max(0, Math.min(1, (dur - t) / 0.35));
     const env = attack * release;
     const d1 = 1 + 0.0035, d2 = 1 - 0.0031;
     const v = 0.34 * Math.sin(TAU * hz * d1 * t)
@@ -69,6 +73,20 @@ const INSTRUMENTS = {
       + 0.16 * Math.sin(TAU * hz * 2 * t + 0.4)
       + 0.08 * Math.sin(TAU * hz * 3 * t + 1.1)
       + 0.05 * Math.sin(TAU * hz * 4.7 * t + 2.1);
+    return gain * env * v;
+  },
+
+  // 有音高：低音。**必须带泛音，不能是纯正弦**——纯正弦在 80–130Hz 就是电流声，
+  // 这正是上一版被投诉「嗡嗡像电流」的成因之一。二三次谐波给了耳朵「这是个音」的依据，
+  // 同时把能量摊开，不再是频谱上的一根针。
+  bass(t, dur, hz, gain) {
+    const attack = Math.min(1, t / 0.08);
+    const release = Math.max(0, Math.min(1, (dur - t) / 0.25));
+    const env = attack * release;
+    const v = 0.62 * Math.sin(TAU * hz * t)
+      + 0.26 * Math.sin(TAU * hz * 2 * t + 0.3)
+      + 0.12 * Math.sin(TAU * hz * 3 * t + 0.9)
+      + 0.05 * Math.sin(TAU * hz * 4.02 * t + 1.4);
     return gain * env * v;
   },
 
@@ -198,7 +216,7 @@ function resolveInstrument(name) {
 /* ---------------- 合成 ---------------- */
 
 function synth(cues) {
-  const { duration, bpm, palette = [], bed = [], patterns = [], events = [] } = cues;
+  const { duration, bpm, palette = [], bed = [], chords = [], patterns = [], events = [] } = cues;
   const total = Math.round(duration * SR);
   const buf = new Float64Array(total);
   const rnd = makeRand(0x5EED);
@@ -236,6 +254,25 @@ function synth(cues) {
         for (const hz of notes) addNote((b.at ?? 0) + s, d, inst, hz, gain);
       }
     }
+  }
+
+  // chords：和声进行。这是「像一首曲子」与「像一台机器在响」的分界线。
+  //
+  // 为什么单独开一段而不是让 bed 自己换音：bed 是「一个音色铺多久」，
+  // chords 是「和声走到哪」。二者生命周期不同——一个和弦可以跨两个 bed，
+  // 一个 bed 也可以盖住三个和弦。混在一起写，改和声就得改 bed。
+  //
+  // 每个和弦多给 tailOverlap 秒：pad 的 release 是 0.35s，不交叠的话
+  // 换和弦的瞬间会掉到零，听感上是一个「抽气」。交叠让两和弦的淡出淡入
+  // 重叠，接缝处才有连续感。
+  const tailOverlap = 0.5;
+  for (const c of chords) {
+    const inst = resolveInstrument(c.inst || 'pad');
+    if (!inst) continue;
+    const gain = c.gain ?? 0.075;
+    const at = c.at ?? 0;
+    const dur = (c.dur ?? 6) + tailOverlap;
+    for (const hz of c.notes || []) addNote(at, dur, inst, hz, gain);
   }
 
   // patterns：节奏型
@@ -402,10 +439,11 @@ try {
 }
 
 const bed = cues.bed || [];
+const chords = cues.chords || [];
 const patterns = cues.patterns || [];
 
 // 硬门禁：既无音乐也无 ambience → 拒绝出谱
-const hasPitched = [...bed, ...patterns].some((x) => resolveInstrument(x.inst));
+const hasPitched = [...bed, ...chords, ...patterns].some((x) => resolveInstrument(x.inst || 'pad'));
 const hasAmbience = [...bed, ...patterns].some((x) => String(x.inst || '').startsWith('ambience'));
 
 if (!hasPitched && !hasAmbience) {
@@ -434,8 +472,8 @@ writeFileSync(outPath, encodeWav(buf, SR));
 
 const seconds = buf.length / SR;
 const usedInstruments = [...new Set(
-  [...bed, ...patterns, ...(cues.events || [])]
-    .map((x) => resolveInstrument(x.inst))
+  [...bed, ...chords, ...patterns, ...(cues.events || [])]
+    .map((x) => resolveInstrument(x.inst || 'pad'))
     .filter(Boolean)
 )];
 
@@ -443,7 +481,7 @@ console.log('');
 console.log(`  ✓ 已生成 ${outPath}`);
 console.log(`    时长 ${seconds.toFixed(2)}s / ${SR}Hz / 单声道 16bit`);
 console.log(`    乐器 ${usedInstruments.join(', ')}`);
-console.log(`    事件 ${(cues.events || []).length} 个 / 床 ${bed.length} 条 / 节奏型 ${patterns.length} 条`);
+console.log(`    事件 ${(cues.events || []).length} 个 / 床 ${bed.length} 条 / 和声 ${chords.length} 个 / 节奏型 ${patterns.length} 条`);
 console.log(`    峰值归一化 ${norm.applied ? `×${norm.gain.toFixed(2)}（原峰 ${norm.peak.toFixed(3)}）` : '跳过（全静音）'}`);
 if (cues.loop) console.log(`    循环：尾部 0.35s 已折进开头`);
 console.log('');

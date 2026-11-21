@@ -2,9 +2,18 @@
   "duration": 4,
   "bpm": 90,
   "loop": false,
-  "palette": ["pad", "pluck", "tick"],
+  "palette": ["pad", "bass", "pluck", "tick", "bell"],
+  "_why_chords": "4 秒片拆成两个 2 秒和弦（Am → F），走一步也算有和声进行。不加 chords 的话整片只有一组音，听感是持续低音而不是音乐。详见 references/06-sound.md 的「缺一个 BGM」一节。",
+  "_why_octave": "每个和弦再叠一层高八度（gain 0.13）。pad 的基频在 low 频段，只加基频会让 mid 更空；高八度把能量推进 250–2k，才通得过「mid ≥ 20%」的失衡判据。",
+  "chords": [
+    { "at": 0, "dur": 2, "inst": "pad", "notes": [220, 261.63, 329.63], "gain": 0.175 },
+    { "at": 2, "dur": 2, "inst": "pad", "notes": [174.61, 220, 261.63], "gain": 0.175 },
+    { "at": 0, "dur": 2, "inst": "pad", "notes": [440, 523.25, 659.25], "gain": 0.13 },
+    { "at": 2, "dur": 2, "inst": "pad", "notes": [349.23, 440, 523.25], "gain": 0.13 }
+  ],
   "bed": [
-    { "at": 0, "dur": 4, "inst": "pad", "notes": [146.83, 220, 293.66], "gain": 0.15 }
+    { "at": 0, "dur": 2, "inst": "bass", "notes": [110], "gain": 0.14 },
+    { "at": 2, "dur": 2, "inst": "bass", "notes": [87.31], "gain": 0.14 }
   ],
   "patterns": [
     { "inst": "pluck", "every": 0.667, "notes": [293.66, 349.23, 440], "from": 0.667, "to": 3.0, "gain": 0.18 }
