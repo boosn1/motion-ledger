@@ -350,6 +350,18 @@ node scripts/concat-bridge.mjs --film out/film.mp4 --stems public/stems \
 
 哪一层一关嗡嗡就没了，问题就定位到那一层。判断口径与五种真凶见 `references/06-sound.md`。
 
+### 在剪辑器里调出来的平衡，要抄回 `cues.mix`
+
+工程里拖滑杆调的平衡只活在工程文件里，重新生成就没了。调好后写回 `cues.json`：
+
+```json
+"mix": { "pad": -31.6 }
+```
+
+单位 dB，相对该层原始电平。写进去后 `score.mjs` 在**合成阶段**乘上它，母版与分轨同时生效——只在剪辑器里压分轨、母版不动，会得到「试听版安静、交付版仍吵」的分裂。
+
+从工程文件反读：`dB = 20*log10(volume)`，但**先看同一工程里其他轨的 volume**（那些是 `stems.json` 的补偿量，不是 1），差值是相对量。细节见 `references/06-sound.md`。
+
 ---
 
 ## 改完之后（这条是纪律，不是建议）

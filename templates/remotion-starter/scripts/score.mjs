@@ -328,10 +328,24 @@ function busOf(inst) {
 const BUS_ORDER = ['pad', 'bass', 'sub', 'bassPluck', 'kick', 'hat', 'pluck', 'perc', 'ambience'];
 
 function synth(cues, opts = {}) {
-  const { duration, bpm, palette = [], bed = [], chords = [], patterns = [], events = [] } = cues;
+  const { duration, bpm, palette = [], bed = [], chords = [], patterns = [], events = [], mix = {} } = cues;
   const total = Math.round(duration * SR);
   const buf = new Float64Array(total);
   const rnd = makeRand(0x5EED);
+
+  // 层音量：作者在剪辑器里试听后定下的各层平衡，写回 cues.mix（单位 dB）。
+  //
+  // 为什么要有这个：分轨铺进 Concat 之后，人耳在时间线上拖滑杆找平衡，
+  // 比在代码里猜 gain 准得多。但那个滑杆只活在工程文件里——下次重新生成
+  // 就没了，于是每次都要再拖一遍。把结论抄回 cues.mix，它才成为事实。
+  //
+  // 关键点：这里乘在**合成阶段**，所以母版 score.wav 与分轨 WAV 同时生效。
+  // 只在剪辑器里压分轨、母版不动，会得到「试听版安静、交付版仍吵」的分裂。
+  const MIX_GAIN = {};
+  for (const b of BUS_ORDER) {
+    const db = mix[b];
+    MIX_GAIN[b] = Number.isFinite(db) ? Math.pow(10, db / 20) : 1;
+  }
 
   // 分轨：buses[name] 是一条独立总线，与 buf 同步累加同一个采样值。
   // 这样「各分轨之和」与「总线」逐采样相等（不含母版链），可以直接验算。
@@ -344,14 +358,16 @@ function synth(cues, opts = {}) {
     if (!fn) return;
     const s0 = Math.round(startSec * SR);
     const n = Math.round(durSec * SR);
-    const bus = wantStems ? buses[busOf(inst)] : null;
+    const busName = busOf(inst);
+    const bus = wantStems ? buses[busName] : null;
+    const mixG = MIX_GAIN[busName] ?? 1;
     // st 是**每个音符私有**的滤波器状态。噪声音色（hat/tick/clap/whoosh/scratch）
     // 需要跨采样记忆上一帧才能做差分高通——没有它就只能在每个采样点吐白噪声。
     const st = {};
     for (let i = 0; i < n; i++) {
       const idx = s0 + i;
       if (idx < 0 || idx >= total) continue;
-      const v = fn(i / SR, durSec, hz, gain, rnd, st);
+      const v = fn(i / SR, durSec, hz, gain, rnd, st) * mixG;
       buf[idx] += v;
       if (bus) bus[idx] += v;
     }
@@ -764,6 +780,11 @@ console.log('');
 
 if (wantStems) {
   console.log(`  分轨已导出到 ${stemsDir}/（母版链之前，用于判断哪一层有问题）`);
+  const mixed = Object.entries(cues.mix || {}).filter(([, v]) => Number.isFinite(v) && Math.abs(v) > 0.05);
+  if (mixed.length) {
+    console.log(`    层音量（cues.mix，合成阶段生效，母版与分轨同时受影响）：`);
+    for (const [k, v] of mixed) console.log(`      ${k.padEnd(11)} ${v > 0 ? '+' : ''}${v.toFixed(1)} dB`);
+  }
   if (stemInfo.gain < 1) {
     console.log(`    九层之和峰值 ${stemInfo.sumPeak.toFixed(3)} 超了，全体统一 ×${stemInfo.gain.toFixed(3)}（相对比例不变）`);
   }
