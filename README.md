@@ -210,6 +210,32 @@ Concat 0.2.12 · D:\Program Files\Concat\concat.exe
 
 没有 Concat 也能交付：`ffmpeg -vf subtitles=` 烧硬字幕、`-i voice.wav -shortest` 接配音、`-f concat` 拼接。**层不会消失，只是实现换了。**
 
+### 配乐被说「嗡嗡」时：先分轨，别猜
+
+成片只有一条混好的音轨，答不了「这个声音是哪来的」。`--stems` 把配乐按耳朵能分辨的层拆开：
+
+```bash
+node scripts/score.mjs --cues scripts/cues.json --out public/score.wav --stems
+```
+
+```
+  层          峰值dBFS   RMS dBFS   占比
+  pad           -8.9    -22.7    14.5%
+  sub           -7.8    -18.2    41.0%
+  bassPluck     -7.0    -21.3    20.0%
+  kick           1.5    -21.9    17.6%
+  hat          -19.8    -45.0     0.1%
+  ...
+```
+
+**这张表就是结论**：81% 能量压在低频四层，`pad` 只有 14.5%、`hat` 只有 0.1%——「嗡嗡」只可能来自那四层。要逐轨试听就铺进 Concat（一层一条轨）：
+
+```bash
+node scripts/concat-stems.mjs --film out/film.mp4 --stems public/stems --name my-film-stems
+```
+
+哪一层一关嗡嗡就没了，问题就定位到那一层。五种真凶与判断口径见 [`references/06-sound.md`](references/06-sound.md)。
+
 ---
 
 ## 改完就推（纪律）
@@ -255,6 +281,7 @@ motion-ledger/
 │   └── 09-capabilities.md          能做什么、不能做什么、成本估计
 ├── scripts/
 │   ├── concat-bridge.mjs           成片 → Concat 剪辑器（加字幕、导出）
+│   ├── concat-stems.mjs            分轨 → Concat 分轨工程（一层一条轨，逐轨静音试听）
 │   └── publish.mjs                 门禁 → 提交 → 推送（一条命令）
 ├── verify/                         ← 门禁（零依赖）
 │   ├── film.mjs                    MP4 体检

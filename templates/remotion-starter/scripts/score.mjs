@@ -296,24 +296,56 @@ function resolveInstrument(name) {
 
 /* ---------------- 合成 ---------------- */
 
-function synth(cues) {
+// 分轨：把音色归到「你耳朵能分辨的那一层」。
+//
+// 为什么按这个维度分而不是按音色分：判断「电流声是哪来的」需要的不是
+// 「kick 单独听是什么样」，而是「低频那层去掉还剩多少嗡嗡」。
+// 所以 pad / bass / sub / bassPluck / kick / hat / pluck / perc / ambience
+// 是九个**可独立静音**的层，而不是十几个音色。
+function busOf(inst) {
+  if (!inst) return null;
+  if (inst.startsWith('ambience')) return 'ambience';
+  if (inst === 'pad') return 'pad';
+  if (inst === 'bass') return 'bass';
+  if (inst === 'sub') return 'sub';
+  if (inst === 'bassPluck') return 'bassPluck';
+  if (inst === 'kick') return 'kick';
+  if (inst === 'hat') return 'hat';
+  if (inst === 'pluck') return 'pluck';
+  // 剩下的一次性音效（tick/clap/whoosh/drop/bell/knock/scratch/boom）
+  // 合成一层：它们是「点」，单独听没有意义，但要能整体静音。
+  return 'perc';
+}
+
+const BUS_ORDER = ['pad', 'bass', 'sub', 'bassPluck', 'kick', 'hat', 'pluck', 'perc', 'ambience'];
+
+function synth(cues, opts = {}) {
   const { duration, bpm, palette = [], bed = [], chords = [], patterns = [], events = [] } = cues;
   const total = Math.round(duration * SR);
   const buf = new Float64Array(total);
   const rnd = makeRand(0x5EED);
+
+  // 分轨：buses[name] 是一条独立总线，与 buf 同步累加同一个采样值。
+  // 这样「各分轨之和」与「总线」逐采样相等（不含母版链），可以直接验算。
+  const wantStems = Boolean(opts.stems);
+  const buses = {};
+  if (wantStems) for (const b of BUS_ORDER) buses[b] = new Float64Array(total);
 
   const addNote = (startSec, durSec, inst, hz, gain) => {
     const fn = INSTRUMENTS[inst];
     if (!fn) return;
     const s0 = Math.round(startSec * SR);
     const n = Math.round(durSec * SR);
+    const bus = wantStems ? buses[busOf(inst)] : null;
     // st 是**每个音符私有**的滤波器状态。噪声音色（hat/tick/clap/whoosh/scratch）
     // 需要跨采样记忆上一帧才能做差分高通——没有它就只能在每个采样点吐白噪声。
     const st = {};
     for (let i = 0; i < n; i++) {
       const idx = s0 + i;
       if (idx < 0 || idx >= total) continue;
-      buf[idx] += fn(i / SR, durSec, hz, gain, rnd, st);
+      const v = fn(i / SR, durSec, hz, gain, rnd, st);
+      buf[idx] += v;
+      if (bus) bus[idx] += v;
     }
   };
 
@@ -385,7 +417,7 @@ function synth(cues) {
     addNote(e.at ?? 0, e.dur ?? 0.8, inst, hz, gain);
   }
 
-  return buf;
+  return wantStems ? { buf, buses } : buf;
 }
 
 /* ---------------- 后处理 ---------------- */
@@ -599,7 +631,11 @@ if (!Number.isFinite(duration) || duration <= 0) {
   process.exit(2);
 }
 
-const buf = synth(cues);
+const wantStems = args.stems === true || args.stems === 'true';
+const stemsDir = typeof args['stems-dir'] === 'string' ? args['stems-dir'] : 'public/stems';
+
+const out = synth(cues, { stems: wantStems });
+const buf = wantStems ? out.buf : out;
 masterChain(buf, SR);
 const norm = normalize(buf);
 
@@ -608,6 +644,40 @@ fadeInOut(buf, 0.02, SR);
 
 mkdirSync(dirname(resolve(outPath)), { recursive: true });
 writeFileSync(outPath, encodeWav(buf, SR));
+
+// 分轨导出。注意：分轨是**母版链之前**的总线信号，所以：
+//   - 各分轨之和 ≠ 最终 score.wav（母版链改过频响、限幅器压过峰值）
+//   - 但各分轨之间的相对比例是真的，这正是判断「哪一层在嗡」需要的
+// 想让分轨之和等于成品，就得把母版链对每条分轨各跑一遍——那会把
+// 「这一层本身有没有问题」和「母版链怎么处理它」混在一起，失去诊断价值。
+let stemInfo = [];
+if (wantStems) {
+  mkdirSync(stemsDir, { recursive: true });
+  const mk = makeRand(0x5EED);
+  for (const name of BUS_ORDER) {
+    const bus = out.buses[name];
+    let peak = 0;
+    let sum = 0;
+    for (let i = 0; i < bus.length; i++) {
+      const a = Math.abs(bus[i]);
+      if (a > peak) peak = a;
+      sum += bus[i] * bus[i];
+    }
+    const rms = Math.sqrt(sum / Math.max(1, bus.length));
+    const silent = peak < 1e-6;
+    const file = `${stemsDir}/${name}.wav`;
+    writeFileSync(file, encodeWav(bus, SR));
+    stemInfo.push({
+      name,
+      file,
+      peak,
+      rms,
+      peakDb: peak > 0 ? 20 * Math.log10(peak) : -Infinity,
+      rmsDb: rms > 0 ? 20 * Math.log10(rms) : -Infinity,
+      silent,
+    });
+  }
+}
 
 /* ---------------- 报告 ---------------- */
 
@@ -626,6 +696,25 @@ console.log(`    事件 ${(cues.events || []).length} 个 / 床 ${bed.length} �
 console.log(`    峰值归一化 ${norm.applied ? `×${norm.gain.toFixed(2)}（原峰 ${norm.peak.toFixed(3)}）` : '跳过（全静音）'}`);
 if (cues.loop) console.log(`    循环：尾部 0.35s 已折进开头`);
 console.log('');
+
+if (wantStems) {
+  console.log(`  分轨已导出到 ${stemsDir}/（母版链之前，用于判断哪一层有问题）`);
+  console.log('');
+  console.log('    层          峰值dBFS   RMS dBFS   占比');
+  console.log('    ----------  --------   --------   ------');
+  const totalRms2 = stemInfo.reduce((a, s) => a + s.rms * s.rms, 0);
+  for (const s of stemInfo) {
+    const share = totalRms2 > 0 ? (s.rms * s.rms) / totalRms2 : 0;
+    const peakS = s.silent ? '   —   ' : s.peakDb.toFixed(1).padStart(6);
+    const rmsS = s.silent ? '   —   ' : s.rmsDb.toFixed(1).padStart(6);
+    const shareS = s.silent ? '  —   ' : `${(share * 100).toFixed(1)}%`.padStart(6);
+    console.log(`    ${s.name.padEnd(11)} ${peakS}   ${rmsS}   ${shareS}`);
+  }
+  console.log('');
+  console.log('    占比 = 该层能量占九层总能量的比例（按 RMS² 算，即真实功率占比）');
+  console.log('    想让哪层消失：把对应的 WAV 删掉或静音，其余按原样叠加即可');
+  console.log('');
+}
 
 if (Math.abs(seconds - duration) > 0.01) {
   console.error(`  ⚠ 音频时长 ${seconds.toFixed(3)}s 与 cues.duration ${duration}s 不一致\n`);

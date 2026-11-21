@@ -212,6 +212,32 @@ Do not use it in place of Remotion — that is drawing animation in an NLE, posi
 
 Without Concat you can still deliver: `ffmpeg -vf subtitles=` for burned-in captions, `-i voice.wav -shortest` to attach narration, `-f concat` to join clips. **The layer does not disappear; only the implementation changes.**
 
+### When the score sounds "buzzy": split stems, don't guess
+
+A delivered film has one mixed audio track, which cannot answer "where is that sound coming from". `--stems` splits the score by layers your ears can actually separate:
+
+```bash
+node scripts/score.mjs --cues scripts/cues.json --out public/score.wav --stems
+```
+
+```
+  layer        peak dBFS   RMS dBFS   share
+  pad             -8.9     -22.7    14.5%
+  sub             -7.8     -18.2    41.0%
+  bassPluck       -7.0     -21.3    20.0%
+  kick             1.5     -21.9    17.6%
+  hat            -19.8     -45.0     0.1%
+  ...
+```
+
+**This table is the conclusion**: 81% of the energy sits in the four low layers, while `pad` holds 14.5% and `hat` only 0.1% — so the buzz can only come from those four. To audition track by track, lay the stems into Concat (one layer per track):
+
+```bash
+node scripts/concat-stems.mjs --film out/film.mp4 --stems public/stems --name my-film-stems
+```
+
+Mute one track at a time; whichever one kills the buzz is your culprit. The five real causes and their thresholds are in [`references/06-sound.md`](references/06-sound.md).
+
 ---
 
 ## Publish discipline
@@ -257,6 +283,7 @@ motion-ledger/
 │   └── 09-capabilities.md          what it can and cannot make, with cost estimates
 ├── scripts/
 │   ├── concat-bridge.mjs           film → Concat editor (captions, export)
+│   ├── concat-stems.mjs            stems → Concat stems project (one layer per track)
 │   └── publish.mjs                 gates → commit → push in one command
 ├── verify/                         ← gates (zero dependencies)
 │   ├── film.mjs                    MP4 physical check

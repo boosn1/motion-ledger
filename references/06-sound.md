@@ -377,6 +377,38 @@ function masterChain(buf, sampleRate) {
 
 > **教训**：注释写「高通」不等于代码做了高通。这类「注释与实现不符」的 bug，靠读代码看不出来（注释是自洽的），只能靠**测量**抓——所以 `score.mjs` 改动后必须跑一次频谱平坦度。
 
+### 定位方法：先分轨，再听
+
+上面两个真凶都是靠「哪一层在响」定位的，不是靠猜。**所以配乐出问题时，第一个动作是分轨，不是重调参数。**
+
+```bash
+node scripts/score.mjs --cues scripts/cues.json --out public/score.wav --stems
+```
+
+它按「耳朵能分辨的层」导出九条独立 WAV，并打一张占比表：
+
+```
+  层          峰值dBFS   RMS dBFS   占比
+  pad           -8.9    -22.7    14.5%
+  bass         -19.5    -30.3     2.5%
+  sub           -7.8    -18.2    41.0%
+  bassPluck     -7.0    -21.3    20.0%
+  kick           1.5    -21.9    17.6%
+  hat          -19.8    -45.0     0.1%
+  pluck        -18.5    -34.6     0.9%
+  perc          -6.6    -29.0     3.4%
+```
+
+**这张表就是诊断结论**：81% 的能量压在低频四层（sub + bassPluck + kick + bass），`pad` 只有 14.5%——「嗡嗡」只可能来自那四层，`pad` 和 `pluck` 无罪。反过来，如果 `hat` 占比异常高，就该去查噪声高通（真凶二）。
+
+要看逐轨试听，把分轨铺进 Concat（一层一条轨，可逐轨静音）：
+
+```bash
+node scripts/concat-stems.mjs --film out/film.mp4 --stems public/stems --name my-film-stems
+```
+
+细节见 `08-delivery.md` 的「分轨工程」一节。
+
 ### 顺带发现：Remotion 渲染会固定压掉 3.2dB
 
 同一份 `score.wav`（RMS -18.8 dBFS、peak 0.890）渲进 `film.mp4` 后变成 **RMS -21.8 dBFS、peak 0.614**——固定的 3.2dB 衰减。

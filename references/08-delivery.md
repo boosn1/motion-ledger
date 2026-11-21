@@ -143,6 +143,83 @@ C:\Users\boosn\concat-motion-probe\probe is not open - open it first (code: notO
 
 ---
 
+## 分轨工程：把配乐拆成一层一条轨
+
+交付时最常被问到的问题是「这个声音是哪来的」。成片只有一条混好的音轨，答不了。
+
+`score.mjs --stems` 会把配乐按**耳朵能分辨的层**拆成独立 WAV：
+
+```bash
+node scripts/score.mjs --cues scripts/cues.json --out public/score.wav --stems
+```
+
+```
+  层          峰值dBFS   RMS dBFS   占比
+  pad           -8.9    -22.7    14.5%
+  bass         -19.5    -30.3     2.5%
+  sub           -7.8    -18.2    41.0%
+  bassPluck     -7.0    -21.3    20.0%
+  kick           1.5    -21.9    17.6%
+  hat          -19.8    -45.0     0.1%
+  pluck        -18.5    -34.6     0.9%
+  perc          -6.6    -29.0     3.4%
+```
+
+这张表本身就是诊断结论：81% 的能量在低频四层，`pad` 只有 14.5%，`hat` 只有 0.1%——「嗡嗡」只可能来自那四层。
+
+再把分轨铺成 Concat 工程，一层一条轨：
+
+```bash
+node scripts/concat-stems.mjs \
+  --film out/film.mp4 \
+  --stems public/stems \
+  --subs-from-spec src/spec.ts \
+  --name my-film-stems
+```
+
+打开工程后**逐轨静音**，哪一层一关嗡嗡就没了，问题就定位到那一层。这比反复渲片试听快得多。
+
+### 归并规则：按「耳朵能分辨的层」，不按音色
+
+`busOf()` 把 14 个音色归成 9 层：
+
+| 层 | 归进来的音色 | 为什么这样分 |
+|---|---|---|
+| `pad` | pad | 和声床，最长的那层 |
+| `bass` | bass | 长音低音 |
+| `sub` | sub | 40–80Hz 打点 |
+| `bassPluck` | bassPluck | 80–160Hz 打点 |
+| `kick` | kick | 底鼓 |
+| `hat` | hat | 高频打点 |
+| `pluck` | pluck | 旋律 |
+| `perc` | tick / clap / whoosh / drop / bell / knock / scratch / boom | 点缀，单独听没意义 |
+| `ambience` | ambience_* | 环境床 |
+
+判断「电流声是哪来的」需要的不是「kick 单独听是什么样」，而是「低频那层去掉还剩多少嗡嗡」。所以按频段与角色归并，不按音色原样拆。
+
+### 两个必须知道的实现细节
+
+**分轨之和 ≠ `score.wav`。** 分轨导的是**母版链之前**的总线信号，`score.wav` 过了一遍压缩、EQ、限幅。所以分轨能用来判断「哪一层在响」，不能用来拼回原样。
+
+**静音层会被跳过。** `score.mjs` 会给没用到的层也导一个空 WAV（比如本片没有环境床，`ambience.wav` 全是 0）。`concat-stems.mjs` 读 WAV 头扫 data 区，全静音的层不铺轨——多一条无声轨会让人误以为「这层有问题」。
+
+### 一个只能靠自检抓出来的坑
+
+Concat 的 `media_import` 返回的 `structuredContent` 里**同时**有 `createdId` 和**整个媒体列表** `media[]`。
+
+第一版脚本遍历整个对象找 `m\d+`，第一条永远是已经导入过的 `film.mp4`（`m1`）。结果九条音轨上放的全是视频，而脚本一路打印「成功」——分轨文件确实导进去了，但一条都没用上。
+
+**这种静默错位只能靠回读时间线抓出来。** 所以 `concat-stems.mjs` 铺完轨后会重新 `timeline_read`，按 `cl.media` → `mediaName` 逐条核对每条音轨上是否正好是它自己的那一层，不符直接 `throw`：
+
+```
+分轨没有正确落位：
+  bass → t4 上是 film.mp4
+```
+
+`track_add` 同样：`createdId` 是**小写** `t42`，而 `timeline.tracks[]` 里是**大写** `T1`。读错就会把九条轨全叠到第一条上。
+
+---
+
 ## 不给 Concat 时的替代方案
 
 没有 Concat 也能交付，只是少一层便利：

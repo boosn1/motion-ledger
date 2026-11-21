@@ -284,6 +284,7 @@ node verify/film.mjs --film out/film.mp4 --spec src/spec.ts
 | 配乐 / 声音 | `references/06-sound.md` |
 | 想知道为什么这么设计 | `references/07-competitive-map.md` |
 | 成片之后要字幕 / 多轨 / 混音 / 交付 | `references/08-delivery.md` |
+| 配乐被投诉「嗡嗡」「没律动」「不像一首曲子」 | `references/06-sound.md`，先 `score.mjs --stems` 分轨再判断 |
 | 判断一个需求该不该用这套流程 | `references/09-capabilities.md` |
 
 **四层怎么分**：纪律（台账）→ 工艺（怎么设计）→ 门禁（能不能被证明）→ 交付（能不能发出去）。每一层只解决自己的问题，越界的活交给下一层。`docs/ARCHITECTURE.md` 里写了每层「不管什么」，那部分比「管什么」更常被违反。
@@ -306,6 +307,24 @@ node scripts/concat-bridge.mjs --film out/film.mp4 --out final.mp4 \
 分工是明确的：**motion-ledger 管「这一帧长什么样」，Concat 管「什么时候出现、上面写什么字」**。不要用 Concat 替代 Remotion（那是用剪辑软件画动画），也不要指望 Remotion 做字幕排版和配音对齐。详见 `references/08-delivery.md`。
 
 没有 Concat 也能交付：`ffmpeg -vf subtitles=` 烧硬字幕、`-i voice.wav -shortest` 接配音、`-f concat` 拼接。只是没有「拖一下就好」的手感。
+
+### 配乐出问题时：先分轨，再判断
+
+用户说「嗡嗡」「有电流声」「没律动」「不像一首曲子」时，**不要凭听感调参数**——先看是哪一层在响：
+
+```bash
+node scripts/score.mjs --cues scripts/cues.json --out public/score.wav --stems
+```
+
+它导出九条独立 WAV（pad / bass / sub / bassPluck / kick / hat / pluck / perc / ambience）并打一张占比表。占比表本身就是诊断结论：低频四层占 81% 时「嗡嗡」只可能来自那四层；`hat` 占比异常则去查噪声高通。
+
+要逐轨试听就铺进 Concat（一层一条轨，可逐轨静音）：
+
+```bash
+node scripts/concat-stems.mjs --film out/film.mp4 --stems public/stems --name my-film-stems
+```
+
+哪一层一关嗡嗡就没了，问题就定位到那一层。判断口径与五种真凶见 `references/06-sound.md`。
 
 ---
 
