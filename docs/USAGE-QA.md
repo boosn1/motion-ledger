@@ -108,14 +108,37 @@ Agent 会先把它翻译成可执行的四项，再回来跟你确认：
 
 ### Q8. 两条渲染路线怎么选？
 
+**先跑前置检查，再谈选哪条。** 不许凭印象——尤其不许拿「本机没装 Chrome」当 Remotion 不可用的理由，它自带 headless 浏览器：
+
+```powershell
+Test-Path templates/remotion-starter/node_modules
+Get-ChildItem templates/remotion-starter/node_modules/.remotion/chrome-headless-shell -Recurse -Filter chrome-headless-shell.exe |
+  Select-Object FullName, Length
+```
+
 | | `templates/remotion-starter` | `templates/node-starter` |
 |---|---|---|
-| 依赖 | npm（Remotion 4.0.545 + React 19） | 零 npm，只要 Node + ffmpeg |
-| 画质 | 高（浏览器渲染，字体排版准） | 中（自己写的扫描线光栅器） |
-| 适合 | 正式交付、有文字排版、需要 `@remotion/google-fonts` | 环境受限、快速验证、纯几何图形 |
-| 上手 | `npm install` 约 1 分钟 | 立刻能跑 |
+| 依赖 | npm（Remotion 4.0.545 + React 19，152 包） | 零 npm（或仅 `@napi-rs/canvas`） |
+| 浏览器 | **自带** `node_modules/.remotion/chrome-headless-shell`（260 MB），不依赖系统 Chrome | 不需要 |
+| 画质 | 高（浏览器渲染，字体排版准） | 中（自写光栅，或 Canvas 2D） |
+| 渲染速度（1080p 实测） | 约 5–15 fps | **43–53 fps**（差 3–5 倍） |
+| 遮罩 / 差集 / 环带 | SVG `clipPath` / `fill-rule`，要手写 path | `ctx.clip()` 一行；环带靠 nonzero winding |
+| 适合 | 文字为主、多栏布局、需要 `@remotion/google-fonts`、必须复用 `Film.tsx` | 遮罩擦除多、布尔差集多、长片多轮改稿、环境受限 |
 
-**默认选 Remotion。** 只有装不了 npm 包、或者片子是纯几何图形（没有文字排版）时才用 node-starter。
+**默认选 Remotion**（`concat-bridge.mjs --subs-from-spec`、`SUBS` 的解析正则、`MASTER_VOL` 补偿值全是照它写的）。改用 node-starter 意味着你要自己保证 `spec.mjs` 里的 `SUBS` 形态一致（见 Q9 末尾的提醒）。
+
+**完整的「判断条件 → 选择结果」决策表见 `references/10-route-selection.md`**，含六个维度的实测对照与混合策略。
+
+一句话速查：
+
+```
+装不了 npm 或没有 headless shell        → node-starter
+遮罩 / 差集 / 环带 / 逐像素              → node-starter
+1080p 且 >60s 且要改 5 轮以上           → node-starter
+文字为主 / 多栏 / 复杂 CSS              → Remotion
+要复用 Film.tsx 或 spring()/interpolate() → Remotion
+以上都不命中                            → Remotion
+```
 
 ---
 
@@ -138,6 +161,21 @@ node scripts/concat-bridge.mjs --film out/film.mp4 --out final.mp4 `
 
 `--subs-from-spec` 直接读 `spec.ts` 的 `SUBS` 数组（单一真相源，不用另存一份 SRT）。也可以给现成字幕文件：`--subs my.srt`（支持 `.srt` / `.vtt` / `.json`）。
 **好处：改一个字不用重渲，在 Concat 里双击就改。** 60 秒片重渲一次约 4 分钟，改字幕等 4 分钟是浪费。
+
+**字幕底色默认是透明的。** 想要半透明底板才传 `--caption-bg "#05070AB8"`；不传就没有 background（`captionBg` 默认 `null`，桥接里是 `if (a.captionBg) style.background = a.captionBg;`）。**要「透明」就删掉这个参数，不要传一个表示透明的色值。**
+
+**字幕不要复述画面大字。** 实测教训：把 10 句画面大字逐句搬进字幕轨（15 条），导出后抽帧一看是重影——画面左侧已有「我们要到 2040 年才知道」，底部字幕又打一遍。字幕只承担大字**没说**的连接词。同一句话在一帧里只能出现一次。
+
+**node-starter 路线要自己写 `SUBS`。** `parseSubsFromSpec` 的正则只认 `[[数字, 数字, '文案']]` 形态：
+
+```js
+export const SUBS = [ // E08 S18 S19
+  [8.6, 11.8, '光，要走很久'],
+  [22.6, 25.6, '光在路上走了 640 年'],
+];
+```
+
+漏了它，桥接读到空数组，**不报错、只是没有字幕**——跑完要抽帧验证，别信退出码。
 
 **B. 顺手把配乐拆成一层一条轨（判断配乐问题的唯一可靠办法）**
 

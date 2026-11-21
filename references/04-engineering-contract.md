@@ -1,12 +1,12 @@
 # 04 · 工程契约
 
-两个渲染栈：**Remotion**（React + SVG → MP4）和 **HTML + GSAP**（浏览器时间线 → 截帧 → MP4）。
+三个渲染栈：**Remotion**（React + SVG → MP4）、**HTML + GSAP**（浏览器时间线 → 截帧 → MP4）、**node-starter**（`@napi-rs/canvas` 或纯 Node 光栅 → rawvideo pipe → ffmpeg）。**选哪条**见 `10-route-selection.md`。
 
 无论用哪个，**确定性规则完全相同**。违反任何一条，`verify/film.mjs` 会抓出来。
 
 ---
 
-## 通用确定性规则（两个栈都必须遵守）
+## 通用确定性规则（三个栈都必须遵守）
 
 | 禁止 | 为什么 | 用什么代替 |
 |---|---|---|
@@ -146,7 +146,71 @@ ffmpeg -framerate 60 -i frames/%05d.png -c:v libx264 -pix_fmt yuv420p out/film.m
 
 ---
 
-## 工程结构（两栈通用）
+## 栈 C：node-starter（自写光栅 / Canvas 2D → rawvideo pipe）
+
+零 npm 或仅 `@napi-rs/canvas`。模板见 `templates/node-starter/`，真实项目用法见本文件末尾的「栈 C 的三处陷阱」。
+
+### 时间从哪来
+
+没有渲染器给帧号，自己 pump：
+
+```js
+for (let i = from; i < to; i++) {
+  const t = i / FILM.fps;          // 唯一的时间源
+  drawScene(ctx, t);               // 一切都是 t 的闭式解
+  await drain(ff.stdin.write(Buffer.from(cv.data())));
+}
+```
+
+**禁止**用 `performance.now()` 或累计 `dt` 推进动画——那会让「渲第 900 帧」和「从头播到第 900 帧」结果不同。
+
+### 输出
+
+rawvideo 直接 pipe 给 ffmpeg，参数顺序硬要求**所有 `-i` 在输出选项之前**：
+
+```js
+const ff = spawn('ffmpeg', [
+  '-v', 'error', '-y',
+  '-f', 'rawvideo', '-pix_fmt', 'rgba', '-s', `${W}x${H}`, '-r', String(fps),
+  '-i', 'pipe:0',
+  ...(hasAudio ? ['-i', 'public/score.wav'] : []),
+  '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p',
+  '-movflags', '+faststart',
+  ...(hasAudio ? ['-c:a', 'aac', '-b:a', '192k', '-shortest'] : []),
+  outFile,
+]);
+ff.stdin.on('error', (e) => { if (e.code !== 'EPIPE') throw e; });
+```
+
+`EPIPE` 必须吞掉：ffmpeg 提前退出（参数错、磁盘满）时，写端会收到 EPIPE，不吞就会盖掉 ffmpeg 真正的报错。
+
+### 遮罩与差集（栈 C 的最大优势）
+
+```js
+// 文字遮罩擦除：字从下往上「长出来」，不是整体变淡
+ctx.save();
+ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
+for (let i = 0; i < chars.length; i++) fillText(chars[i], x + adv * i, y + offs[i]);
+ctx.restore();
+
+// 环带：外圈顺时针 + 内圈逆时针 → nonzero winding 挖空
+function bandFill(ctx, pts, w, color, alpha) {
+  const cx = mean(pts.x), cy = mean(pts.y);
+  const k = Math.max(0, 1 - w / perimeter(pts));
+  poly(ctx, pts, { fill: color, alpha });
+  poly(ctx, innerScaled(pts, cx, cy, k).reverse(), { fill: color, alpha });
+}
+```
+
+### 栈 C 的三处陷阱
+
+1. **`--spec` 传 `src/spec.mjs`**，不是 `src/spec.ts`；`FILM` 必须写成 `const FILM = {...};` 的单行字段形式（门禁用正则读，不是解释器）。
+2. **`SUBS` 要手写**，形态 `[[起始秒, 结束秒, '文案']]`——`concat-bridge.mjs --subs-from-spec` 只认这个，缺了它静默通过且没有字幕。
+3. **门禁从仓库根跑**。在模板目录里跑会 `MODULE_NOT_FOUND`。
+
+---
+
+## 工程结构（三栈通用）
 
 ```
 项目/
@@ -164,16 +228,18 @@ ffmpeg -framerate 60 -i frames/%05d.png -c:v libx264 -pix_fmt yuv420p out/film.m
 
 ## 验收前的自查清单
 
-- [ ] 所有常量都有台账 id
+- [ ] 所有常量都有台账 id（**不落成数字的条款写进文件头注释**——`collectSourceIds` 扫源码任意位置）
 - [ ] 没有 starter 占位符（`TITLE` / `SUBTITLE` / `duration: 10`）
-- [ ] 没有 `Date.now` / `Math.random` / `setTimeout` / `@keyframes`
+- [ ] 没有 `Date.now` / `Math.random` / `setTimeout` / `@keyframes`（确需 `Date.now` 打进度就加行尾 `// ledger-allow: 理由`）
 - [ ] 场景在窗口外返回 null，不用 `<Sequence>`
 - [ ] 缓动只用 `EASE.*` / `settle()`
 - [ ] 没有 TODO
 - [ ] 首帧不是闪色
 - [ ] 循环时 `t=D` 帧等于第 0 帧
+- [ ] 同类元素的退场手法统一（线在平滑退、字不能一帧消失）
+- [ ] 收尾 hold 里没有「全幅亮度呼吸」（8 位量化会退化成整帧跳 1 级）
 
-跑：
+跑（**从仓库根**，node-starter 路线 `--spec` 传 `src/spec.mjs`）：
 
 ```bash
 node verify/spec.mjs --ledger LEDGER.md --src src/

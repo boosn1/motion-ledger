@@ -200,7 +200,9 @@ t=1.40s: E02 标题逐字入场 · 错开 0.04s / EASE.out / 0.6s · S31
 
 ## Stage 5 — 构建
 
-双渲染契约（Remotion / HTML+GSAP）与确定性规则见 `references/04-engineering-contract.md`。
+三条渲染路线（Remotion / HTML+GSAP / node-starter 自写光栅）的确定性规则见 `references/04-engineering-contract.md`；**选哪条**见 `references/10-route-selection.md`（判断条件 → 选择结果，附前置检查命令）。
+
+> 路线选择的第一个动作**永远是跑前置检查**，不是凭印象：`node_modules` 在不在 → `.remotion/chrome-headless-shell` 在不在 → 真渲 30 帧能不能出片。**「本机没装 Chrome」不是 Remotion 不可用的理由**——它自带 headless 浏览器。
 
 通用硬规则：
 - **禁** `Date.now()` 场景状态、未种子随机、只能从 0 播放才对的模拟、与主时间线竞争的独立 CSS 动画、帧间 state。
@@ -216,8 +218,10 @@ t=1.40s: E02 标题逐字入场 · 错开 0.04s / EASE.out / 0.6s · S31
 
 ```bash
 node verify/spec.mjs --ledger LEDGER.md --src src/
-node verify/film.mjs --film out/film.mp4 --spec src/spec.ts
+node verify/film.mjs --film out/film.mp4 --spec src/spec.ts   # node-starter 路线传 src/spec.mjs
 ```
+
+**门禁一律从仓库根调用**，参数给相对仓库根的路径。在 `templates/node-starter/` 里跑 `node verify/../../verify/film.mjs` 会 `MODULE_NOT_FOUND`（见 `references/11-pitfalls.md` A2）。
 
 `spec.mjs` 查：台账覆盖率、未记账常量、starter 占位符残留、禁用项（渐变/glow/emoji 等）。
 `film.mjs` 查：格式对 spec、首帧无闪色、循环接缝 SSIM、运动曲线无计划外尖峰、中段无死区、有声音时音频非静音。
@@ -280,6 +284,8 @@ node verify/film.mjs --film out/film.mp4 --spec src/spec.ts
 | 设计某个元素 | `references/02-playbooks.md` |
 | 定时值 / 选视觉语法 / 排注意力 | `references/03-timing-and-grammar.md` |
 | 写代码 / 换渲染栈 | `references/04-engineering-contract.md` |
+| 不知道选 Remotion 还是 node-starter | `references/10-route-selection.md`，先跑前置检查再选 |
+| 踩过的坑（门禁/动效/音频/交付/排版/诊断/仓库） | `references/11-pitfalls.md` |
 | 验收 / 复审 / 禁用清单 | `references/05-review.md` |
 | 配乐 / 声音 | `references/06-sound.md` |
 | 想知道为什么这么设计 | `references/07-competitive-map.md` |

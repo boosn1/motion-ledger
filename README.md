@@ -281,12 +281,14 @@ motion-ledger/
 │   ├── 01-ledgers.md               三张台账的完整规则
 │   ├── 02-playbooks.md             9 类元素：怎么建 / 怎么动 / 常见失败
 │   ├── 03-timing-and-grammar.md    时值表、视觉语法、注意力编排、美术方向
-│   ├── 04-engineering-contract.md  双渲染契约（Remotion / HTML+GSAP）+ 确定性规则
+│   ├── 04-engineering-contract.md  三栈契约（Remotion / HTML+GSAP / node-starter）+ 确定性规则
 │   ├── 05-review.md                五评委 → 代码门禁映射、独立复审、禁用清单
 │   ├── 06-sound.md                 声音政策与配乐规格
 │   ├── 07-competitive-map.md       同类项目横向对比（选型依据）
 │   ├── 08-delivery.md              交付层：字幕/多轨/混音/Concat 桥
-│   └── 09-capabilities.md          能做什么、不能做什么、成本估计
+│   ├── 09-capabilities.md          能做什么、不能做什么、成本估计
+│   ├── 10-route-selection.md       两条渲染路线怎么选（判断条件 → 结果，含前置检查命令）
+│   └── 11-pitfalls.md              踩坑清单：A 路线/B 门禁/C 动效/D 音频/E 交付/F 排版/G 诊断/H 仓库
 ├── scripts/
 │   ├── concat-bridge.mjs           成片 → Concat 剪辑器（加字幕、导出）
 │   └── publish.mjs                 门禁 → 提交 → 推送（一条命令）
@@ -323,12 +325,21 @@ motion-ledger/
 
 **两份台账不要混**：`examples/LEDGER.example.md` 是**教学范例**（带逐条解释、回写源码示例、对账结果），`templates/*/LEDGER.md` 是**门禁输入**（真实片子用的，含峰值/静止声明表）。要抄格式抄后者，要理解规则读前者。
 
-**两条渲染路线怎么选**：
+**两条渲染路线怎么选**（完整决策表与实测对照见 [`references/10-route-selection.md`](references/10-route-selection.md)）：
 
-- **Remotion**（`templates/remotion-starter`）——有 Studio 实时预览、组件化、字体生态、生产用得多。要 `npm install`。
-- **纯 Node 光栅器**（`templates/node-starter`）——零依赖、直接出帧，适合无 npm 环境或要嵌进别的流水线。功能少得多（没有 Studio，形状能力靠手写光栅）。
+- **Remotion**（`templates/remotion-starter`）——有 Studio 实时预览、组件化、字体生态、生产用得多。要 `npm install`。**自带 headless 浏览器**（`node_modules/.remotion/chrome-headless-shell`），不依赖系统 Chrome——所以「本机没装 Chrome」不是不用它的理由。
+- **纯 Node / Canvas 光栅**（`templates/node-starter`）——零依赖、直接出帧，适合无 npm 环境或要嵌进别的流水线。**遮罩擦除、布尔差集、环带、逐像素处理比 Remotion 顺手得多**（`ctx.clip()` 一行 vs 手写 SVG path）；1080p 实测 43–53 fps，比 Remotion 快 3–5 倍，长片多轮改稿时差别很大。
 
-门禁对两条路线都适用：`spec.mjs` 扫源码注释，`film.mjs` 只认 MP4。
+**先跑前置检查再选**，不许凭印象：
+
+```powershell
+Test-Path templates/remotion-starter/node_modules
+Get-ChildItem templates/remotion-starter/node_modules/.remotion/chrome-headless-shell -Recurse -Filter chrome-headless-shell.exe
+```
+
+一句话速查：装不了 npm 或没有 headless shell / 遮罩差集环带为主 / 1080p 且 >60s 且要改 5 轮以上 → node-starter；文字为主 / 多栏 / 复杂 CSS / 要复用 `Film.tsx` 或 `spring()` → Remotion；**以上都不命中 → Remotion**（`concat-bridge` 与 `SUBS` 解析都是照它写的）。
+
+门禁对两条路线都适用：`spec.mjs` 扫源码注释，`film.mjs` 只认 MP4。**门禁一律从仓库根调用**，node-starter 路线 `--spec` 传 `src/spec.mjs`。
 
 ---
 
