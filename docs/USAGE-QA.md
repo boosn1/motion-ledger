@@ -39,7 +39,9 @@ Agent 会先把它翻译成可执行的四项，再回来跟你确认：
 时长：60s（你说了 1 分钟左右）
 画幅：16:9 横屏
 声音：纯音乐 + 硬字幕（你没说要旁白，默认不加，因为合成的旁白人声在科普片里很容易听出机器味）
-风格：data-instrument（精确仪器感）——反常识题材靠"数字被推翻"制造张力，仪器感的刻度、坐标、计数器正好承载
+风格：precise instrument（精确仪器感）——反常识题材靠"数字被推翻"制造张力，仪器感的刻度、坐标、计数器正好承载
+       （六个材质世界见 references/03-timing-and-grammar.md：editorial ink / precise instrument /
+         folded paper / tactile collage / vector geometry / painterly field。全片只许用一个。）
 ```
 
 这四项一旦确认，它们就变成台账里的 S01–S04，后面所有工作都以它们为准，中途改要重排时间线。
@@ -82,7 +84,7 @@ Agent 会先把它翻译成可执行的四项，再回来跟你确认：
 
 ### Q6. 门禁报错了，我该怎么办？
 
-先看它报的是哪一类。六道门禁里，五道是「确定性检查」，一道是「你自己的声明」：
+先看它报的是哪一类。六道门禁分别是：门禁自测（`selftest.mjs`）、配乐脚本一致（`sync.mjs`）、台账对账 ×2（两个 starter）、成片体检 ×2（两个 starter）。**其中只有「成片体检」里的峰值与死区两项是声明式的**——其余全是确定性检查：
 
 | 报错 | 意思 | 你该做什么 |
 |---|---|---|
@@ -91,9 +93,10 @@ Agent 会先把它翻译成可执行的四项，再回来跟你确认：
 | `禁用项 命中 glow` | 源码里有 `filter: blur` 或发光 | 删掉，或证明这是「有动机的光」并写进豁免 |
 | `计划外尖峰 t=5.3` | 第 5.3 秒有一次没人声明的剧烈运动 | 要么修掉，要么在台账 `### 计划内运动峰值` 里声明这个区间 |
 | `长死区 2.1s–4.6s` | 中间两秒半画面几乎不动 | 要么加运动，要么在 `### 计划内静止` 里声明 |
-| `音频 -52 dB` | 音轨几乎是静音 | 检查 `FILM.sound` 与 `public/score.wav` |
+| `音频 -58.2 dB` | 音轨几乎是静音（阈值 −70 dB，比这更小声就判失败） | 检查 `FILM.sound` 与 `public/score.wav` |
+| `配乐脚本不一致` | 两个 starter 的 `score.mjs` 分叉了 | 跑 `node verify/sync.mjs --write`，把 remotion 版覆盖到 node 版 |
 
-**注意最后两条的措辞**：门禁不说「这里不该动」，它说「你没声明」。因为**动得对不对只有你知道，代码只负责抓你没声明就动。**
+**注意尖峰与死区那两条的措辞**：门禁不说「这里不该动」，它说「你没声明」。因为**动得对不对只有你知道，代码只负责抓你没声明就动。**
 
 ### Q7. 为什么不能改 `motion.tsx`？
 
@@ -120,18 +123,41 @@ Agent 会先把它翻译成可执行的四项，再回来跟你确认：
 
 ### Q9. 成片出来了，字幕怎么办？
 
-两条路：
+三条路，按「改字要不要重渲」分：
 
-**A. 硬字幕烧进画面（推荐，60s 以内）**
+**A. 字幕不进画面，在 Concat 里做（默认，推荐）**
+
+模板 `Film.tsx` 里本来就没有 `<Subtitles />`——画面干净，字幕由 `SUBS` 数组驱动，用一条命令交给 Concat：
 
 ```powershell
 node scripts/concat-bridge.mjs --film out/film.mp4 --out final.mp4 `
-  --caption "反常识：越努力越慢" --caption-start 0.6 --caption-dur 3.0
+  --subs-from-spec src/spec.ts `
+  --caption-size 0.042 --caption-offset 0.35 `
+  --caption-bg "#05070AB8" --font "Noto Sans SC" --color "#F4F1EA"
 ```
 
-这会把字幕烧进画面，输出 `final.mp4`。Concat 会自动找到（装了就找得到），找不到会报错并告诉你查哪个路径。
+`--subs-from-spec` 直接读 `spec.ts` 的 `SUBS` 数组（单一真相源，不用另存一份 SRT）。也可以给现成字幕文件：`--subs my.srt`（支持 `.srt` / `.vtt` / `.json`）。
+**好处：改一个字不用重渲，在 Concat 里双击就改。** 60 秒片重渲一次约 4 分钟，改字幕等 4 分钟是浪费。
 
-**B. 字幕作为独立文件（要上传 B 站/YouTube 时）**
+**B. 顺手把配乐拆成一层一条轨（判断配乐问题的唯一可靠办法）**
+
+在 A 的基础上加 `--stems public/stems`：
+
+```powershell
+node scripts/concat-bridge.mjs --film out/film.mp4 --out final.mp4 `
+  --subs-from-spec src/spec.ts --stems public/stems
+```
+
+工程里会变成：视频轨（静音）+ 8 条分轨（bass / bassPluck / hat / kick / pad / perc / pluck / sub）+ 1 条字幕轨，**没有空轨**。逐轨静音就能听出「嗡嗡」是哪一层来的。
+分轨由 `node scripts/score.mjs --stems` 生成，同时写出 `stems.json` 记建议补偿量（分轨是母版链之前的信号，原样相加会削顶）。
+只想要工程不想导出（在 GUI 里逐轨调平衡）：加 `--no-export --name 我的工程`。
+
+**C. 字幕烧进画面（要一次成型、不再改字时）**
+
+在 `Film.tsx` 里自己加一个 `<Subtitles />`（写法见 `references/08-delivery.md`），重渲。适合发平台后不会再改的成片。
+代价：以后改一个字要重渲全片。
+
+**D. 字幕作为独立文件（要上传 B 站/YouTube 时）**
 
 用 `ffmpeg` 生成 `.srt`，或让 Agent 从台账的事件表直接导出。
 
@@ -151,12 +177,23 @@ node scripts/publish.mjs
 
 它会依次做四件事：跑六道门禁 → 查悬空引用 → 提交 → 推送。门禁不过就拒绝提交——**坏的门禁比没有门禁更糟**。
 
-推完之后还要同步到 DSH 技能目录（`publish.mjs` 不做这一步，因为它不该知道 DSH 装在哪）：
+推完之后还要同步到 DSH 技能目录（`publish.mjs` 不做这一步，因为它不该知道 DSH 装在哪）。**在仓库根目录执行**：
 
 ```powershell
+$src = (Get-Location).Path
 $dst = Join-Path $env:DSH_HOME "skills\motion-ledger"
 # 本机 DSH_HOME 在 D 盘，用变量取，别硬编码 C:\Users\<你>\.dsh
+Remove-Item -Recurse -Force $dst -ErrorAction SilentlyContinue
+& "C:\Program Files\Git\cmd\git.exe" -C $src ls-files | ForEach-Object {
+  $t = Join-Path $dst $_
+  New-Item -ItemType Directory -Force (Split-Path $t) | Out-Null
+  Copy-Item (Join-Path $src $_) $t
+}
 ```
+
+用 `git ls-files` 而不是 `Copy-Item -Recurse`，是为了不带进 `node_modules` / `out` / `.git`（那三样占全项目 98% 的字节）。
+
+同步完可以在技能目录里独立跑一次 `node verify/selftest.mjs` 确认它真的能工作，而不只是文件到位。
 
 ### Q12. 我换台机器，要重装什么？
 
@@ -218,11 +255,12 @@ npm run render
 
 ```
 你说：我要一条 60 秒反常识科普片
- ↓ Agent 问：类型 / 时长 / 画幅 / 配音（缺哪个问哪个）
+ ↓ Agent 问：类型 / 时长 / 画幅 / 声音（缺哪个问哪个）
  ↓ 确认后 → 三张台账 → 时间线 → 关键构图 → 代码
  ↓ 六道门禁：自测 / 配乐一致 / 台账对账×2 / 成片体检×2
- ↓ out/film.mp4
- ↓ 可选：concat-bridge.mjs 加字幕 → final.mp4
+ ↓ out/film.mp4（字幕默认不在画面里）
+ ↓ 可选：concat-bridge.mjs --subs-from-spec → final.mp4
+ ↓ 配乐有疑问：--stems 铺分轨，逐轨静音听
 ```
 
-**改完 skill 记得**：`node scripts/publish.mjs`（门禁不过就拒绝提交）。
+**改完 skill 记得**：`node scripts/publish.mjs`（门禁不过就拒绝提交），再同步到 `$env:DSH_HOME/skills/motion-ledger`。

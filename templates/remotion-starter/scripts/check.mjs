@@ -45,11 +45,14 @@ function readPeakWindows() {
 
 const peakWindows = readPeakWindows();
 
-const DEFAULT_TIMES = '1.2,3.0,13.4,25.0,30.2,38.0,41.0,47.5,53.0'; // 示例片 60s 用；换片子请用 TIMES= 覆盖
-const times = (process.env.TIMES || DEFAULT_TIMES)
-  .split(',')
-  .map((s) => Number(s.trim()))
-  .filter((n) => Number.isFinite(n));
+// 抽帧时刻。**默认跟片长走**，不写死——所以这里只存原始表达式，等拿到 dur 再算。
+//
+// 写死过一版（示例片 60 秒用的 1.2,3.0,13.4,25.0,...,53.0），结果 15 秒的 starter
+// 一跑就「拼图失败」——因为 25.0 秒这种时刻在这支片里根本不存在，ffmpeg seek 越界，
+// 九张里只抽出来三张，拼图凑不齐。**默认值必须对任何片长都成立。**
+//
+// 规则：在 [0.04, 0.96] × 片长 上等距取 9 个点。想看特定时刻就显式给 TIMES。
+const TIMES_ENV = process.env.TIMES;
 
 const passes = [];
 const failures = [];
@@ -73,10 +76,13 @@ rmSync(CHECK, { recursive: true, force: true });
 mkdirSync(CHECK, { recursive: true });
 
 /* ── 1. 格式 ── */
+// 只取第一条视频流：不加 -select_streams 时音频流也会被列出来，
+// 它的 r_frame_rate 是 0/0，会在 Object.fromEntries 里覆盖掉视频的真实帧率，
+// 于是打印出「@ 0/0」这种看着像坏了的读数。
 const probe = run('ffprobe', [
   '-v', 'error',
+  '-select_streams', 'v:0',
   '-show_entries', 'stream=width,height,r_frame_rate,codec_type',
-  '-show_entries', 'format=duration',
   '-of', 'default=nw=1',
   FILM,
 ]);
@@ -87,7 +93,16 @@ const info = Object.fromEntries(
     .filter((p) => p.length === 2)
     .map(([k, v]) => [k.trim(), v.trim()])
 );
-const dur = Number(info.duration);
+// 时长要单独问 format（-select_streams 会把 format 段一起吞掉）
+const durProbe = run('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nw=1', FILM]);
+const dur = Number(durProbe.text.split('\n').find((l) => l.startsWith('duration='))?.slice(9));
+
+// 抽帧时刻：默认在 [0.04, 0.96] × 片长 上等距取 9 个点，任何片长都成立；
+// 显式给 TIMES 就用给的，越界的一律夹回片尾前 0.1 秒。
+const DEFAULT_TIMES = Array.from({ length: 9 }, (_, i) => (0.04 + (0.92 * i) / 8) * dur);
+const times = (TIMES_ENV ? TIMES_ENV.split(',').map((s) => Number(s.trim())) : DEFAULT_TIMES)
+  .filter((n) => Number.isFinite(n))
+  .map((n) => Math.min(n, Math.max(0, dur - 0.1)));
 
 console.log('');
 console.log(`  成片 ${info.width}×${info.height} @ ${info.r_frame_rate} / ${dur.toFixed(2)}s`);

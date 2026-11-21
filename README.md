@@ -255,11 +255,11 @@ node scripts/publish.mjs --dry    # 只检查不提交
 
 门禁不过就拒绝提交——**坏的门禁比没有门禁更糟**，它会让后面所有结论都不可信。
 
-推完同步到 DSH 技能目录（否则本地技能中心还是旧版）：
+推完同步到 DSH 技能目录（否则本地技能中心还是旧版）。**在仓库根目录执行**：
 
 ```powershell
-$src = "D:\Users\boosn\周国强工作\Deepseek Harness\临时\motion-ledger"
-$dst = "D:\Users\boosn\.dsh\skills\motion-ledger"
+$src = (Get-Location).Path        # 不写死盘符：换个目录 clone 下来照样能用
+$dst = Join-Path $env:DSH_HOME "skills\motion-ledger"   # 本机 DSH_HOME 在 D 盘，别硬编码 C:\Users\<你>\.dsh
 Remove-Item -Recurse -Force $dst -ErrorAction SilentlyContinue
 & "C:\Program Files\Git\cmd\git.exe" -C $src ls-files | ForEach-Object {
   $t = Join-Path $dst $_

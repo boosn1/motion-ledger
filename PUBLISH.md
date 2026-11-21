@@ -164,7 +164,8 @@ $git = "C:\Program Files\Git\cmd\git.exe"
 
 ```powershell
 # 用 git ls-files 逐文件复制，避免带进 node_modules / out / .git
-$src = "D:\Users\boosn\周国强工作\Deepseek Harness\临时\motion-ledger"
+# 在仓库根目录执行；$src 用当前目录，不写死盘符
+$src = (Get-Location).Path
 $dst = Join-Path $env:DSH_HOME "skills\motion-ledger"
 $git = "C:\Program Files\Git\cmd\git.exe"
 cd $src
