@@ -112,10 +112,16 @@ const INSTRUMENTS = {
   },
 
   // 节奏：短促高频点击
-  tick(t, dur, hz, gain, rnd) {
+  // 点缀：滴答（界面音）。噪声只取高频部分。
+  tick(t, dur, hz, gain, rnd, st) {
     const env = Math.exp(-t / 0.012);
-    const n = rnd() * 2 - 1;
-    return gain * env * (0.6 * n + 0.4 * Math.sin(TAU * 2200 * t));
+    // 差分高通：n[i] - n[i-1]。白噪声的差分会把能量按 6dB/oct 推向高频，
+    // 低频那半截——也就是听起来像「电流」的那半截——被抵消掉。
+    const n0 = rnd() * 2 - 1;
+    const n1 = st.prevTick ?? 0;
+    st.prevTick = n0;
+    const hp = (n0 - n1) * 0.5;
+    return gain * env * (0.7 * hp + 0.3 * Math.sin(TAU * 2200 * t));
   },
 
   // 节奏：底鼓。**三层，缺一层就不像鼓**。
@@ -170,25 +176,44 @@ const INSTRUMENTS = {
   },
 
   // 节奏：拍手，噪声爆发
-  clap(t, dur, hz, gain, rnd) {
+  // 节奏：拍手。噪声本体，但**必须高通**，否则和踩镲一起变成一层嘶嘶声。
+  clap(t, dur, hz, gain, rnd, st) {
     const env = Math.exp(-t / 0.045) * Math.min(1, t / 0.002);
-    return gain * env * (rnd() * 2 - 1) * 0.8;
+    const n0 = rnd() * 2 - 1;
+    const n1 = st.prevClap ?? 0;
+    st.prevClap = n0;
+    // 二次差分：比一次差分更陡（12dB/oct），把 400Hz 以下基本清空
+    const hp = (n0 - 2 * n1 + (st.prevClap2 ?? 0)) * 0.35;
+    st.prevClap2 = n1;
+    return gain * env * hp * 0.8;
   },
 
-  // 节奏：踩镲，高通噪声
-  hat(t, dur, hz, gain, rnd) {
+  // 节奏：踩镲。**这次真的做高通了**——原来注释写「一阶差分近似高通」，
+  // 但代码里根本没有差分，吐的是全频带白噪声（实测频谱平坦度 0.73，
+  // 白噪声是 1.0、乐音 <0.1）。60 秒里响 120 次，听感就是持续的「嘶——」，
+  // 也就是用户说的「嗡嗡电流声盖过 BGM」。
+  hat(t, dur, hz, gain, rnd, st) {
     const env = Math.exp(-t / 0.02);
-    const n = rnd() * 2 - 1;
-    // 一阶差分近似高通
-    return gain * env * n * 0.5;
+    const n0 = rnd() * 2 - 1;
+    const n1 = st.prevHat ?? 0;
+    st.prevHat = n0;
+    // 二次差分（12dB/oct 高通）：能量推到 4kHz 以上，成为真正的「嚓」而不是「嘶」
+    const hp = (n0 - 2 * n1 + (st.prevHat2 ?? 0)) * 0.35;
+    st.prevHat2 = n1;
+    return gain * env * hp * 1.6;
   },
 
   // 点缀：扫风，噪声 + 带通包络
-  whoosh(t, dur, hz, gain, rnd) {
+  // 点缀：扫风。原来是「全频噪声 × 慢正弦」，那个正弦只是把噪声**调制**了一下，
+  // 底子仍是全频白噪声。现在噪声先过一次差分高通，再乘扫频正弦做带通感。
+  whoosh(t, dur, hz, gain, rnd, st) {
     const env = Math.sin(Math.PI * Math.min(1, t / dur)) ** 2;
-    const n = rnd() * 2 - 1;
+    const n0 = rnd() * 2 - 1;
+    const n1 = st.prevWhoosh ?? 0;
+    st.prevWhoosh = n0;
+    const hp = (n0 - n1) * 0.5;
     const center = 900 + 2600 * (t / dur);
-    return gain * env * n * 0.45 * Math.sin(TAU * center * t) * 0.3 + gain * env * n * 0.25;
+    return gain * env * (hp * 0.7 + Math.sin(TAU * center * t) * 0.3) * 0.5;
   },
 
   // 点缀：下落，扫频向下
@@ -209,10 +234,12 @@ const INSTRUMENTS = {
   },
 
   // 点缀：刮擦
-  scratch(t, dur, hz, gain, rnd) {
+  scratch(t, dur, hz, gain, rnd, st) {
     const env = Math.exp(-t / 0.08) * Math.min(1, t / 0.01);
-    const n = rnd() * 2 - 1;
-    return gain * env * n * 0.6;
+    const n0 = rnd() * 2 - 1;
+    const n1 = st.prevScratch ?? 0;
+    st.prevScratch = n0;
+    return gain * env * (n0 - n1) * 0.4;
   },
 
   // 点缀：低频轰鸣
@@ -222,25 +249,35 @@ const INSTRUMENTS = {
     return gain * env * Math.sin(TAU * f * t) * 0.9;
   },
 
-  // 环境床：雨（噪声 + 稀疏噼啪）
-  ambience_rain(t, dur, hz, gain, rnd) {
-    const n = rnd() * 2 - 1;
-    const hiss = n * 0.28;
+  // 环境床：雨（高通噪声 + 稀疏噼啪）
+  // 环境床比节奏音色更危险：它是**常驻**的，全频白噪声铺 60 秒就是底噪本身。
+  ambience_rain(t, dur, hz, gain, rnd, st) {
+    const n0 = rnd() * 2 - 1;
+    const n1 = st.prevRain ?? 0;
+    st.prevRain = n0;
+    const hiss = (n0 - n1) * 0.5 * 0.34;
     const drop = rnd() < 0.0009 ? (rnd() * 2 - 1) * 0.9 : 0;
     return gain * (hiss + drop);
   },
 
-  // 环境床：风（低频噪声起伏）
-  ambience_wind(t, dur, hz, gain, rnd) {
-    const n = rnd() * 2 - 1;
+  // 环境床：风（高通噪声 × 慢速起伏）
+  ambience_wind(t, dur, hz, gain, rnd, st) {
+    const n0 = rnd() * 2 - 1;
+    const n1 = st.prevWind ?? 0;
+    st.prevWind = n0;
+    const hp = (n0 - n1) * 0.5;
     const sway = 0.5 + 0.5 * Math.sin(TAU * 0.13 * t);
-    return gain * n * 0.3 * sway;
+    return gain * hp * 0.42 * sway;
   },
 
   // 环境床：房间（极低噪声 + 轻微驻波）
-  ambience_room(t, dur, hz, gain, rnd) {
-    const n = rnd() * 2 - 1;
-    return gain * (n * 0.06 + 0.04 * Math.sin(TAU * 62 * t));
+  // 这里**故意不高速**——房间底噪本来就是低频的，高通会把它变成嘶声。
+  // 用一阶低通（滑动平均）只留很低的隆隆。
+  ambience_room(t, dur, hz, gain, rnd, st) {
+    const n0 = rnd() * 2 - 1;
+    const lp = (st.prevRoom ?? 0) * 0.985 + n0 * 0.015;
+    st.prevRoom = lp;
+    return gain * (lp * 1.6 + 0.04 * Math.sin(TAU * 62 * t));
   },
 };
 
@@ -270,10 +307,13 @@ function synth(cues) {
     if (!fn) return;
     const s0 = Math.round(startSec * SR);
     const n = Math.round(durSec * SR);
+    // st 是**每个音符私有**的滤波器状态。噪声音色（hat/tick/clap/whoosh/scratch）
+    // 需要跨采样记忆上一帧才能做差分高通——没有它就只能在每个采样点吐白噪声。
+    const st = {};
     for (let i = 0; i < n; i++) {
       const idx = s0 + i;
       if (idx < 0 || idx >= total) continue;
-      buf[idx] += fn(i / SR, durSec, hz, gain, rnd);
+      buf[idx] += fn(i / SR, durSec, hz, gain, rnd, st);
     }
   };
 
@@ -409,8 +449,9 @@ function biquad(buf, type, freq, sampleRate, Q = 0.707, gainDb = 0) {
 //
 // 现在这条链：不砍低频，改成「压中低 + 提一点高频」。
 function masterChain(buf, sampleRate) {
-  // 30Hz 以下只有隆隆声没有音高，切掉不损失任何东西（参考曲最低峰在 32Hz）
-  biquad(buf, 'highpass', 30, sampleRate, 0.7);
+  // 38Hz 高通：低于这个频率多数设备放不出来，只会变成音箱的隆隆失真。
+  // 而且它占据峰值 → 归一化被它拉低 → 整片听起来小。原来写 30Hz，漏了 30–38Hz 这一段。
+  biquad(buf, 'highpass', 38, sampleRate, 0.7);
   // 160–400Hz 是我们堆得最满的频段（29.2%，参考曲只有 5.6%），压 3.5dB
   biquad(buf, 'peak', 260, sampleRate, 1.0, -3.5);
   // 400–1200Hz 我们占 41.4%（参考曲 5.4%），再压一点，把中频让出来
@@ -433,7 +474,9 @@ function masterChain(buf, sampleRate) {
 // 这里用 2:1 软拐点，阈值 -16dBFS：低于阈值完全不动（保住打点的瞬态），
 // 高于阈值每 2dB 只留 1dB，峰值被收住，归一化就能把整体推上去。
 function limiter(buf, sampleRate) {
-  const thr = 0.158;          // -16 dBFS
+  // -13 dBFS 而不是 -16：用户反馈「BGM 音量有些小」。参考曲 peak 只有 -3.7dBFS
+  // 却比我们响，因为它靠压缩提 RMS。阈值放高 3dB，整片平均音量跟着上 3dB。
+  const thr = 0.224;          // -13 dBFS
   const ratio = 2;
   const attack = Math.exp(-1 / (0.004 * sampleRate));   // 4ms
   const release = Math.exp(-1 / (0.120 * sampleRate));  // 120ms

@@ -69,7 +69,7 @@ function parseArgs(argv) {
     color: '#F4F1EA',
     concat: null,
     json: false,
-    keep: false,
+    keep: true,
     timeout: 300,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -97,7 +97,8 @@ function parseArgs(argv) {
       case '--concat': a.concat = v; i++; break;
       case '--timeout': a.timeout = Number(v); i++; break;
       case '--json': a.json = true; break;
-      case '--keep': a.keep = true; break;
+    case '--keep': a.keep = true; break;
+    case '--no-keep': a.keep = false; break;
       case '-h':
       case '--help': a.help = true; break;
       default:
@@ -333,7 +334,8 @@ async function main() {
     log('  --concat <path>           指定 concat.exe；默认自动找');
     log('  --timeout <秒>            导出等待上限，默认 300');
     log('  --json                    输出机器可读结果');
-    log('  --keep                    保留中间工程目录');
+    log('  --keep                    保留中间工程目录（现在默认就保留）');
+    log('  --no-keep                 导出成功后删掉工程目录');
     process.exit(a.help ? 0 : 2);
   }
 
@@ -471,8 +473,14 @@ async function main() {
     result.bytes = statSync(out).size;
     result.ok = true;
     if (!a.json) log(`交付 ${out} · ${result.bytes} bytes`);
+    // 工程路径必须说出来：用户要在 Concat GUI 里打开它继续改。
+    // 之前的默认行为是导出完就删，用户打开 Concat 只看到「项目不存在」。
+    if (!a.json) log(`工程保留在 ${projectDir}`);
   } finally {
     c.stop();
+    // 清掉 concat.lock：Concat 在进程退出时不一定回收它，留下的锁会让 GUI
+    // 打开工程时报「已被占用」。PID 已被系统回收给别的进程时更是死锁。
+    try { rmSync(join(projectDir, 'concat.lock'), { force: true }); } catch { /* 没锁就算了 */ }
     if (!a.keep) {
       try { rmSync(projectDir, { recursive: true, force: true }); } catch { /* 占着就算了 */ }
       try { rmSync(join(workRoot, `${projectName}.mp4`), { force: true }); } catch { /* 同上 */ }

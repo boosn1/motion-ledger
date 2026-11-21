@@ -85,7 +85,24 @@ stderr 会打印：
 concat mcp: serving through {"mode":"headless","writesUnder":["\\\\?\\C:\\Users\\boosn"]}
 ```
 
-所以工程目录落在 `C:\Users\<user>` 下，成片再拷到 `--out`。脚本默认用 `~/.motion-ledger-concat/`，跑完自动清掉。要放别处必须传 `--work`，但 headless 仍然会拒写——这时候要么改用 `--mcp window`（需要桌面会话），要么就让它留在默认位置。
+所以工程目录落在 `C:\Users\<user>` 下，成片再拷到 `--out`。脚本默认用 `~/.motion-ledger-concat/`。
+
+**工程目录默认保留**（`--keep` 现在是默认行为，`--no-keep` 才删）。这是踩过一次坑之后改的：早期默认删掉，用户去 Concat GUI 里打开，只看到「项目不存在」——因为工程真的被删了。跑完脚本会打印：
+
+```
+交付 C:\...\final.mp4 · 3803328 bytes
+工程保留在 C:\Users\<user>\.motion-ledger-concat\film-mwpy79hq
+```
+
+把第二行那个路径在 Concat 里打开，就能继续改字幕、加轨、调时间线。
+
+**还有一个隐性坑：`concat.lock`。** Concat 退出时不一定回收这个锁文件，留下一个指向已死进程的 PID。GUI 打开工程时会认为「已被占用」而拒绝。桥接脚本在 `finally` 里无条件清掉它：
+
+```js
+try { rmSync(join(projectDir, 'concat.lock'), { force: true }); } catch { /* 没锁就算了 */ }
+```
+
+自己手动清也行：删掉工程目录下的 `concat.lock` 再打开。
 
 ### 项目不会自己保持打开
 
