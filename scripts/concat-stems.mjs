@@ -172,6 +172,15 @@ class Concat {
     return { text, structured: r.result?.structuredContent, raw: r.result };
   }
 
+  // 编辑命令统一走 edit_apply：一个 command 一个 undo 步。
+  // 为什么不用专门的工具：Concat 只暴露了 track_add，删轨、静音、
+  // 把视频的声音拆出来这些都得走 edit_apply 的命令对象。
+  // 注意参数名是单数 `command`（实测 required: ["path","command"]），
+  // 传 commands 数组会被 schema 拒绝。
+  async edit(projectDir, command) {
+    return this.tool('edit_apply', { path: projectDir, command });
+  }
+
   stop() {
     try { this.proc.kill(); } catch { /* 已经退了 */ }
   }
@@ -270,13 +279,24 @@ async function main() {
 
     // 视频片段铺满整片
     await open();
-    await c.tool('clip_add', {
+    const vClip = await c.tool('clip_add', {
       path: projectDir,
       mediaId: vMedia,
       trackId: vTrack.id,
       start: 0,
     });
+    const vClipId = vClip.structured?.createdId ?? null;
     log(`视频进 ${vTrack.id}`);
+
+    // 视频轨必须静音：成片本身自带混好的音轨，不静音的话
+    // 分轨与成片音轨会叠在一起——试听时听到的是「两遍配乐」，
+    // 而且成片音轨会把分轨的效果盖掉，逐轨静音就失去意义了。
+    // 这一步用 clip_update 的 muted（实测 patch 里有这个字段）。
+    if (vClipId) {
+      await open();
+      await c.tool('clip_update', { path: projectDir, clipId: vClipId, patch: { muted: true } });
+      log(`视频轨已静音（成片自带的音轨关掉，只听分轨）`);
+    }
 
     // 每条分轨一条音频轨
     let added = 0;
@@ -319,9 +339,6 @@ async function main() {
       log(`字幕 ${cueCount} 条`);
     }
 
-    await open();
-    await c.tool('project_save', { path: projectDir });
-
     // 自检：核对每条音轨上放的确实是它自己那一层。
     // 为什么必须自检：media_import 返回的是整个媒体列表，误读 createdId 会让
     // 九条轨全放同一个视频，而脚本一路打印「成功」。这种静默错位只能靠
@@ -343,6 +360,29 @@ async function main() {
     if (mismatches.length) {
       throw new Error(`分轨没有正确落位：\n  ${mismatches.join('\n  ')}`);
     }
+
+    // 删掉空轨：新建工程自带 4 条空轨（T1–T4），只用了 T1 放视频，
+    // 其余三条空着。留着它们在 GUI 里就是三条「什么都没有的横条」，
+    // 会让人以为「这里本该有内容但丢了」。
+    //
+    // 必须在所有 clip 铺完之后再删：先删会让后面的 track_add 复用编号，
+    // 而 Concat 的轨道 id 在删除后不会重排，容易和自检里的记录对不上。
+    await open();
+    const before = await c.tool('timeline_read', { path: projectDir });
+    const tb = parseTimeline(before);
+    const used = new Set(finalClipsTrackIds(tb.clips));
+    const empties = tb.tracks.filter((t) => !used.has(t.id));
+    for (const t of empties) {
+      await open();
+      await c.edit(projectDir, { op: 'removeTrack', trackId: t.id });
+    }
+    if (empties.length) log(`删掉 ${empties.length} 条空轨（${empties.map((t) => t.id).join(', ')}）`);
+
+    // project_save 必须放在所有编辑之后。
+    // 踩过：之前它写在删空轨之前，结果删轨只活在内存里，
+    // 重新打开工程 T2/T3/T4 又回来了。Concat 的编辑默认不落盘。
+    await open();
+    await c.tool('project_save', { path: projectDir });
 
     // 清锁：留着会让 GUI 认为工程被占用
     try { rmSync(join(projectDir, 'concat.lock'), { force: true }); } catch { /* 没有就算了 */ }
@@ -398,6 +438,17 @@ function findTrackId(structured) {
   if (typeof structured.createdId === 'string') return structured.createdId;
   if (structured.track && typeof structured.track.id === 'string') return structured.track.id;
   return null;
+}
+
+// 从 clip 列表里取出去重后的轨道 id。
+// clip 的字段名实测是 `track`（不是 trackId），老代码里两种都兼容一下。
+function finalClipsTrackIds(clips) {
+  const out = [];
+  for (const cl of clips ?? []) {
+    const id = cl.track ?? cl.trackId;
+    if (id && !out.includes(id)) out.push(id);
+  }
+  return out;
 }
 
 // timeline_read / project_open 的真实结构（实测）：

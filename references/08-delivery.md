@@ -203,6 +203,29 @@ node scripts/concat-stems.mjs \
 
 **静音层会被跳过。** `score.mjs` 会给没用到的层也导一个空 WAV（比如本片没有环境床，`ambience.wav` 全是 0）。`concat-stems.mjs` 读 WAV 头扫 data 区，全静音的层不铺轨——多一条无声轨会让人误以为「这层有问题」。
 
+### 视频轨要静音，空轨要删掉
+
+分轨工程建好后有两个细节不做就会让人误判：
+
+**视频轨必须静音。** `film.mp4` 自带混好的音轨。不静音的话，试听时听到的是「分轨 + 成片音轨」两遍配乐叠在一起——而且成片音轨会把分轨的效果盖掉，逐轨静音就失去意义了。用 `clip_update` 的 `muted`：
+
+```js
+await c.tool('clip_update', { path, clipId: videoClipId, patch: { muted: true } });
+```
+
+**新建工程自带 4 条空轨（T1–T4），只用了 T1 放视频，其余三条空着。** 留着它们在 GUI 里就是三条「什么都没有的横条」，看起来像「这里本该有内容但丢了」。用 `edit_apply` 的 `removeTrack` 删掉：
+
+```js
+await c.edit(projectDir, { op: 'removeTrack', trackId: 'T2' });
+```
+
+两个坑：
+
+- **`edit_apply` 的参数是单数 `command`**（`required: ["path","command"]`），不是 `commands` 数组。
+- **`project_save` 必须放在所有编辑之后**。踩过：它写在删空轨之前，删轨只活在内存里，重新打开工程 T2/T3/T4 又回来了。Concat 的编辑默认不落盘。
+
+删轨的时机也要注意：**必须在所有 clip 铺完之后再删**。先删会让后面的 `track_add` 复用编号，而 Concat 的轨道 id 在删除后不会重排，容易和自检里的记录对不上。
+
 ### 一个只能靠自检抓出来的坑
 
 Concat 的 `media_import` 返回的 `structuredContent` 里**同时**有 `createdId` 和**整个媒体列表** `media[]`。
