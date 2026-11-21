@@ -69,6 +69,8 @@ function parseArgs(argv) {
     color: '#F4F1EA',
     // 分轨：给了 --stems 就把配乐拆成一层一条轨（视频轨自动静音）
     stems: null,
+    name: null,          // 工程名（默认 film-<时间戳>）
+    noExport: false,     // true = 只建工程不导出（试听/手工调时用）
     concat: null,
     json: false,
     keep: true,
@@ -97,6 +99,8 @@ function parseArgs(argv) {
       case '--font': a.font = v; i++; break;
       case '--color': a.color = v; i++; break;
       case '--stems': a.stems = v; i++; break;
+      case '--name': a.name = v; i++; break;
+      case '--no-export': a.noExport = true; break;
       case '--concat': a.concat = v; i++; break;
       case '--timeout': a.timeout = Number(v); i++; break;
       case '--json': a.json = true; break;
@@ -336,12 +340,16 @@ class Concat {
 
 async function main() {
   const a = parseArgs(process.argv.slice(2));
-  if (a.help || !a.film || !a.out) {
+  // --out 只在要导出时才必需。--no-export 是「只建工程，我要在 GUI 里试听」。
+  if (a.help || !a.film || (!a.out && !a.noExport)) {
     log('用法: node scripts/concat-bridge.mjs --film <成片.mp4> --out <交付.mp4> [选项]');
+    log('      node scripts/concat-bridge.mjs --film <成片.mp4> --no-export [选项]');
     log('');
     log('  片源');
     log('  --film <path>             motion-ledger 渲染出的成片（必需）');
-    log('  --out <path>              最终交付路径（必需）');
+    log('  --out <path>              最终交付路径（要导出时必需）');
+    log('  --no-export               只建工程不导出（试听/手工调时用，省几十秒）');
+    log('  --name <名字>             工程名，默认 film-<时间戳>');
     log('');
     log('  字幕 · 批量（推荐）');
     log('  --subs <path>             .srt / .vtt / .json 字幕文件');
@@ -380,7 +388,8 @@ async function main() {
   }
 
   const film = resolve(a.film);
-  const out = resolve(a.out);
+  // --no-export 时没有 --out，out 保持 null；只有真要导出才 resolve。
+  const out = a.noExport ? null : resolve(a.out);
   if (!existsSync(film)) throw new Error(`找不到成片：${film}`);
 
   // 先解析字幕再动 Concat——字幕文件写错时不该白起一个进程
@@ -398,7 +407,7 @@ async function main() {
   if (cues && !cues.length) throw new Error('字幕文件解析出 0 条有效条目');
 
   const workRoot = a.work ? resolve(a.work) : join(homedir(), '.motion-ledger-concat');
-  const projectName = 'film-' + Date.now().toString(36);
+  const projectName = a.name ? String(a.name) : 'film-' + Date.now().toString(36);
   const projectDir = join(workRoot, projectName);
   if (!existsSync(workRoot)) mkdirSync(workRoot, { recursive: true });
 
@@ -566,6 +575,16 @@ async function main() {
     // project_save 必须放在所有编辑之后。踩过：它写在删空轨之前，
     // 删轨只活在内存里，重开工程 T2/T3/T4 又回来了。Concat 的编辑默认不落盘。
     await c.tool('project_save', { path: projectDir });
+
+    // --no-export：只建工程不导出。用途是「我要在 GUI 里逐轨试听调平衡」——
+    // 导出一次要几十秒，调平衡时每改一次就导一次纯属浪费。
+    if (a.noExport) {
+      result.ok = true;
+      result.projectDir = projectDir;
+      if (!a.json) log(`工程保留在 ${projectDir}（--no-export，未导出）`);
+      return;
+    }
+
     // 6) 导出。临时落在工程旁，成功后拷到 --out，避免跨盘写入被拒。
     const staged = join(workRoot, `${projectName}.mp4`);
     const ex = await c.tool('export_start', { path: projectDir, output: staged });

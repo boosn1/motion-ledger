@@ -136,9 +136,14 @@ node verify/spec.mjs --ledger LEDGER.md --src src/
 
 # 门禁自测：证明门禁会红也会绿，不是摆设
 node verify/selftest.mjs
+
+# 两份 score.mjs 有没有分叉（starter 必须自包含，所以故意留两份）
+node verify/sync.mjs
 ```
 
-三个脚本只依赖 Node 内置模块 + ffmpeg，**无 npm 依赖，无 node_modules**。
+这四个脚本只依赖 Node 内置模块 + ffmpeg，**无 npm 依赖，无 node_modules**。
+
+**为什么 `score.mjs` 有两份却不算冗余**：`templates/` 下的每个 starter 都要能 `cp -R` 出来独立工作，不能有指回仓库根的相对 import。所以两份是故意的——`verify/sync.mjs` 比对它们的 sha256，分叉了就报错，用脚本防漂移而不是合并。
 
 `selftest.mjs` 在系统临时目录造夹具跑 11 条断言（正例必绿、反例必红、放宽参数必生效），不往仓库写任何东西。
 **换机器、换平台后先跑它**——它能立刻告诉你门禁在这个环境下是否还有效。
@@ -228,11 +233,14 @@ node scripts/score.mjs --cues scripts/cues.json --out public/score.wav --stems
   ...
 ```
 
-**这张表就是结论**：81% 能量压在低频四层，`pad` 只有 14.5%、`hat` 只有 0.1%——「嗡嗡」只可能来自那四层。要逐轨试听就铺进 Concat（一层一条轨）：
+**这张表就是结论**：81% 能量压在低频四层，`pad` 只有 14.5%、`hat` 只有 0.1%——「嗡嗡」只可能来自那四层。要逐轨试听就铺进 Concat（一层一条轨，视频轨自动静音、空轨自动删掉）：
 
 ```bash
-node scripts/concat-bridge.mjs --film out/film.mp4 --stems public/stems --subs-from-spec src/spec.ts --out final.mp4
+node scripts/concat-bridge.mjs --film out/film.mp4 --stems public/stems \
+  --subs-from-spec src/spec.ts --out final.mp4
 ```
+
+一条命令出齐视轨 + 每条分轨一条音轨 + 一条字幕轨。只想在 GUI 里试听不要成片，加 `--no-export`。
 
 哪一层一关嗡嗡就没了，问题就定位到那一层。五种真凶与判断口径见 [`references/06-sound.md`](references/06-sound.md)。
 
@@ -281,7 +289,6 @@ motion-ledger/
 │   └── 09-capabilities.md          能做什么、不能做什么、成本估计
 ├── scripts/
 │   ├── concat-bridge.mjs           成片 → Concat 剪辑器（加字幕、导出）
-│   ├── concat-stems.mjs            只铺分轨的旧脚本（功能已并入 concat-bridge.mjs --stems）
 │   └── publish.mjs                 门禁 → 提交 → 推送（一条命令）
 ├── verify/                         ← 门禁（零依赖）
 │   ├── film.mjs                    MP4 体检
@@ -298,7 +305,14 @@ motion-ledger/
 │   │   ├── src/scenes/             场景（绝对 t，窗口外 return null）
 │   │   ├── scripts/score.mjs       零依赖配乐合成
 │   │   └── scripts/check.mjs       项目内自查
-│   └── node-starter/               备选：纯 Node 光栅器，零 npm 依赖
+│   └── node-starter/               ← 备选：纯 Node 光栅器，零 npm 依赖
+│       ├── LEDGER.md               配套台账
+│       ├── src/spec.mjs            设计常量
+│       ├── src/lib/motion-core.mjs 机制库（不许改）
+│       ├── src/raster.mjs          光栅原语（多边形/环带/描边）
+│       ├── src/film.mjs            场景（逐帧画）
+│       ├── src/render.mjs          出帧 → ffmpeg
+│       └── scripts/score.mjs       配乐（与 remotion 版同源）
 ├── examples/
 │   └── LEDGER.example.md           台账范例（教学用：带解释与对账结果）
 ├── ATTRIBUTION.md                  上游来源与许可

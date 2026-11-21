@@ -138,9 +138,14 @@ node verify/spec.mjs --ledger LEDGER.md --src src/
 
 # Gate self-test: proves the gates go red as well as green
 node verify/selftest.mjs
+
+# Did the two score.mjs copies drift apart? (starters must be self-contained, so two copies are intentional)
+node verify/sync.mjs
 ```
 
-All three depend only on Node built-ins plus ffmpeg — **no npm dependencies, no node_modules**.
+All four depend only on Node built-ins plus ffmpeg — **no npm dependencies, no node_modules**.
+
+**Why two copies of `score.mjs` are not redundancy**: every starter under `templates/` must work after a plain `cp -R`, so it cannot import back into the repo root. The two copies are deliberate — `verify/sync.mjs` compares their sha256 and fails on drift, which is cheaper than merging and re-splitting.
 
 `selftest.mjs` builds fixtures in the system temp directory and runs 11 assertions (positives must pass, negatives must fail, relaxation flags must take effect) without writing anything into the repo.
 **Run it first on a new machine or platform** — it tells you immediately whether the gates are still valid in that environment.
@@ -233,10 +238,11 @@ node scripts/score.mjs --cues scripts/cues.json --out public/score.wav --stems
 **This table is the conclusion**: 81% of the energy sits in the four low layers, while `pad` holds 14.5% and `hat` only 0.1% — so the buzz can only come from those four. To audition track by track, lay the stems into Concat (one layer per track):
 
 ```bash
-node scripts/concat-bridge.mjs --film out/film.mp4 --stems public/stems --subs-from-spec src/spec.ts --out final.mp4
+node scripts/concat-bridge.mjs --film out/film.mp4 --stems public/stems \
+  --subs-from-spec src/spec.ts --out final.mp4
 ```
 
-Mute one track at a time; whichever one kills the buzz is your culprit. The five real causes and their thresholds are in [`references/06-sound.md`](references/06-sound.md).
+One command produces all three: the video track (auto-muted), one audio track per stem, and a caption track. Mute one track at a time; whichever one kills the buzz is your culprit. Add `--no-export` if you only want the project for listening in the GUI. The five real causes and their thresholds are in [`references/06-sound.md`](references/06-sound.md).
 
 ---
 
@@ -283,7 +289,6 @@ motion-ledger/
 │   └── 09-capabilities.md          what it can and cannot make, with cost estimates
 ├── scripts/
 │   ├── concat-bridge.mjs           film → Concat editor (captions, export)
-│   ├── concat-stems.mjs            stems-only script (superseded by concat-bridge.mjs --stems)
 │   └── publish.mjs                 gates → commit → push in one command
 ├── verify/                         ← gates (zero dependencies)
 │   ├── film.mjs                    MP4 physical check
@@ -300,7 +305,14 @@ motion-ledger/
 │   │   ├── src/scenes/             scenes (absolute t, return null outside the window)
 │   │   ├── scripts/score.mjs       zero-dependency score synthesis
 │   │   └── scripts/check.mjs       in-project self-check
-│   └── node-starter/               alternative: pure Node rasteriser, zero npm deps
+│   └── node-starter/               ← alternative: pure Node rasteriser, zero npm deps
+│       ├── LEDGER.md               matching ledger
+│       ├── src/spec.mjs            design constants
+│       ├── src/lib/motion-core.mjs mechanics library (do not modify)
+│       ├── src/raster.mjs          raster primitives (polygon/band/stroke)
+│       ├── src/film.mjs            scenes (drawn frame by frame)
+│       ├── src/render.mjs          frames → ffmpeg
+│       └── scripts/score.mjs       soundtrack (same source as the Remotion copy)
 ├── examples/
 │   └── LEDGER.example.md           teaching example (annotated, with reconciliation output)
 ├── ATTRIBUTION.md                  upstream sources and licences

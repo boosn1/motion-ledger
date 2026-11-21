@@ -21,7 +21,7 @@ node scripts/publish.mjs
 | remote | ✅ `git@github.com:boosn1/motion-ledger.git`（SSH） |
 | SSH 认证 | ✅ `Hi boosn1! You've successfully authenticated` |
 | 门禁 | ✅ selftest 11/11、两份 spec 对账、两份成片门禁全绿 |
-| 最近提交 | `61e7044` feat: 加交付层（Concat 桥）、能力清单、改完即推纪律 |
+| 最近提交 | 见 `git log --oneline -1`（本文件不写死，免得每次提交后自己就过期了） |
 
 ---
 
